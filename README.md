@@ -2,7 +2,7 @@
 
 ## Architecture:
 
-![Central Architecture](./images/mermaid-flow.png)
+![Central Architecture](./images/architecture.png)
 
 [HLD in detail explanation](./HLD.md)
 
