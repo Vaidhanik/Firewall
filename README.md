@@ -1,9 +1,8 @@
 # Firewall
 
-## HLD (High Level Design):
+## Architecture:
 
-![Legend](./images/legend.png)
-![Central Architecture](./images/central_arch.png)
+![Central Architecture](./images/mermaid-flow.png)
 
 [HLD in detail explanation](./HLD.md)
 
