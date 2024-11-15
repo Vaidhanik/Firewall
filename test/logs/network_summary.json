@@ -1,0 +1,25 @@
+{
+    "monitoring_period": {
+        "start": "2024-11-15T23:53:10.577866",
+        "end": "2024-11-15T23:53:10.577883"
+    },
+    "total_applications": 11,
+    "applications": [
+        "1098871",
+        "70181",
+        "1098476",
+        "1088377",
+        "1112007",
+        "1098948",
+        "5285",
+        "1099243",
+        "1099105",
+        "1197",
+        "6724"
+    ],
+    "log_files": {
+        "connections": "/home/psychopunk_sage/dev/Sandbox/SIH/Firewall/test/logs/connection_log_20241115.csv",
+        "statistics": "/home/psychopunk_sage/dev/Sandbox/SIH/Firewall/test/logs/app_statistics_20241115.csv",
+        "security": "/home/psychopunk_sage/dev/Sandbox/SIH/Firewall/test/logs/security_events_20241115.csv"
+    }
+}
