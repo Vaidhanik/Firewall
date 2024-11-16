@@ -1,0 +1,23 @@
+{
+    "monitoring_period": {
+        "start": "2024-11-16T13:41:22.713315",
+        "end": "2024-11-16T13:45:34.002607"
+    },
+    "total_applications": 9,
+    "applications_monitored": [
+        "brave",
+        "WD-TabNine",
+        "vdb",
+        "NetworkManager",
+        "Code",
+        "warp-terminal",
+        "TabNine",
+        "firefox",
+        "TabNine-dee"
+    ],
+    "log_files": {
+        "connections": "connections_20241116_134122.csv",
+        "statistics": "app_stats_20241116_134122.csv",
+        "email_traffic": "email_traffic_20241116_134122.csv"
+    }
+}
