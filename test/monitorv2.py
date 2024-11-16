@@ -1,19 +1,17 @@
-import socket
-import subprocess
-import csv
-import datetime
-import time
-from pathlib import Path
-import json
-from collections import defaultdict
 import os
 import re
-from typing import Optional, Dict
-import uuid
-import netifaces
-import struct
+import csv
+import time
+import json
 import fcntl
-import array
+import socket
+import struct
+import datetime
+import netifaces
+import subprocess
+from pathlib import Path
+from typing import Optional, Dict
+from collections import defaultdict
 
 class NetworkMonitor:
     def __init__(self):
@@ -352,7 +350,7 @@ class NetworkMonitor:
 
         local_mac = None
         remote_mac = None
-    
+
         # Get local MAC
         if conn['local_addr'] in ['0.0.0.0', '::', '*']:
             interface = next(iter(self.interface_macs.values()), None)
@@ -363,7 +361,7 @@ class NetworkMonitor:
                 interface = self.get_interface_by_ip(conn['local_addr'])
                 if interface and interface in self.interface_macs:
                     local_mac = self.interface_macs[interface]
-    
+
         # Get remote MAC
         if conn['remote_addr'].startswith(('192.168.', '10.', '172.')):
             remote_mac = self.get_mac_address(conn['remote_addr'])
