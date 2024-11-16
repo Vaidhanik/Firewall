@@ -8,6 +8,7 @@ import json
 from collections import defaultdict
 import os
 import re
+from typing import Optional, Dict
 
 class NetworkMonitor:
     def __init__(self):
@@ -76,7 +77,7 @@ class NetworkMonitor:
         self.conn_file = self.logs_dir / f"connections_{timestamp}.csv"
         self.conn_headers = [
             'timestamp', 'app_name', 'pid', 'protocol',
-            'local_addr', 'local_port', 'remote_addr', 'remote_port',
+            'local_addr', 'local_port', 'local_mac', 'remote_addr', 'remote_port', 'remote_mac',
             'domain', 'service', 'direction', 'state', 'service_type'
         ]
         
@@ -187,6 +188,41 @@ class NetworkMonitor:
         elif port in [1433, 3306, 5432, 27017]:
             return 'DATABASE'
         return 'OTHER'
+    
+    '''
+    Remote MAC addresses will only be available for devices on the local network
+    Non-local addresses will show 'N/A' for MAC
+    Both arp and ip neighbor commands require root privileges
+    '''
+    def get_mac_address(self, ip: str) -> Optional[str]:
+        """Get MAC address for an IP using arp command"""
+        if ip in ['0.0.0.0', '::', '*', '127.0.0.1', '::1']:
+            return None
+
+        try:
+            # Run arp command
+            arp_cmd = ["arp", "-n", ip]
+            if os.geteuid() != 0:
+                arp_cmd.insert(0, "sudo")
+
+            output = subprocess.check_output(arp_cmd, universal_newlines=True)
+
+            # Extract MAC address using regex
+            mac_match = re.search(r"(?i)([0-9A-F]{2}(?::[0-9A-F]{2}){5})", output)
+            if mac_match:
+                return mac_match.group(1).upper()
+
+            # Try using ip neighbor command as fallback
+            ip_cmd = ["ip", "neighbor", "show", ip]
+            if os.geteuid() != 0:
+                ip_cmd.insert(0, "sudo")
+
+            output = subprocess.check_output(ip_cmd, universal_newlines=True)
+            mac_match = re.search(r"(?i)([0-9A-F]{2}(?::[0-9A-F]{2}){5})", output)
+            return mac_match.group(1).upper() if mac_match else None
+
+        except (subprocess.CalledProcessError, IndexError):
+            return None
 
     def resolve_domain(self, ip):
         """Resolve IP to domain with timeout"""
@@ -206,6 +242,9 @@ class NetworkMonitor:
         service_type = self.get_service_type(domain, conn['remote_port'])
         
         direction = 'OUTBOUND' if conn['remote_port'] in self.service_ports else 'INBOUND'
+
+        local_mac = self.get_mac_address(conn['local_addr'])
+        remote_mac = self.get_mac_address(conn['remote_addr'])
         
         # Log to main connection file
         conn_row = {
@@ -215,8 +254,10 @@ class NetworkMonitor:
             'protocol': conn['protocol'],
             'local_addr': conn['local_addr'],
             'local_port': conn['local_port'],
+            'local_mac': local_mac or 'N/A',
             'remote_addr': conn['remote_addr'],
             'remote_port': conn['remote_port'],
+            'remote_mac': remote_mac or 'N/A',
             'domain': domain,
             'service': service,
             'direction': direction,
@@ -272,11 +313,35 @@ class NetworkMonitor:
         new_apps = current_apps - self.active_apps
         stopped_apps = self.active_apps - current_apps
 
+        # for app in new_apps:
+        #     print(f"\n[+] New application detected: {app}")
+        #     if any(conn['program'] == app and self.get_service_type(self.resolve_domain(conn['remote_addr']), 
+        #            conn['remote_port']).startswith('EMAIL') for conn in connections):
+        #         print(f"    └─ Email-related activity detected")
+        #     if conn['program'] not in self.active_apps:
+        #         mac_info = f"\n    └─ Local MAC: {conn["local_mac"] or 'N/A'}"
+        #         if conn["remote_mac"]:
+        #             mac_info += f"\n    └─ Remote MAC: {conn["remote_mac"]}"
+        #         print(mac_info)
+
         for app in new_apps:
             print(f"\n[+] New application detected: {app}")
-            if any(conn['program'] == app and self.get_service_type(self.resolve_domain(conn['remote_addr']), 
-                   conn['remote_port']).startswith('EMAIL') for conn in connections):
-                print(f"    └─ Email-related activity detected")
+            # Find the connection details for this app
+            for conn in connections:
+                if conn['program'] == app:
+                    # Check for email activity
+                    domain = self.resolve_domain(conn['remote_addr'])
+                    if self.get_service_type(domain, conn['remote_port']).startswith('EMAIL'):
+                        print(f"    └─ Email-related activity detected")
+                    
+                    # Get and display MAC addresses
+                    local_mac = self.get_mac_address(conn['local_addr'])
+                    remote_mac = self.get_mac_address(conn['remote_addr'])
+                    
+                    print(f"    └─ Local MAC: {local_mac or 'N/A'}")
+                    if remote_mac:
+                        print(f"    └─ Remote MAC: {remote_mac}")
+                    break  # Show MAC info only once per new app
 
         for app in stopped_apps:
             print(f"\n[-] Application stopped: {app}")
