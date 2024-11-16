@@ -9,6 +9,11 @@ from collections import defaultdict
 import os
 import re
 from typing import Optional, Dict
+import uuid
+import netifaces
+import struct
+import fcntl
+import array
 
 class NetworkMonitor:
     def __init__(self):
@@ -66,7 +71,12 @@ class NetworkMonitor:
             'smtp.live.com', 'hotmail.com',
             'protonmail.com', 'mail.protonmail.com'
         }
-        
+
+        self.interface_macs = self.get_all_interface_macs()
+        print("\nDetected Network Interfaces:")
+        for interface, mac in self.interface_macs.items():
+            print(f"    {interface}: {mac}")
+
         self.initialize_logs()
 
     def initialize_logs(self):
@@ -194,35 +204,132 @@ class NetworkMonitor:
     Non-local addresses will show 'N/A' for MAC
     Both arp and ip neighbor commands require root privileges
     '''
+    # def get_mac_address(self, ip: str) -> Optional[str]:
+    #     """Get MAC address for an IP using arp command"""
+    #     if ip in ['0.0.0.0', '::', '*', '127.0.0.1', '::1']:
+    #         return None
+
+    #     try:
+    #         # Run arp command
+    #         arp_cmd = ["arp", "-n", ip]
+    #         if os.geteuid() != 0:
+    #             arp_cmd.insert(0, "sudo")
+
+    #         output = subprocess.check_output(arp_cmd, universal_newlines=True)
+
+    #         # Extract MAC address using regex
+    #         mac_match = re.search(r"(?i)([0-9A-F]{2}(?::[0-9A-F]{2}){5})", output)
+    #         if mac_match:
+    #             return mac_match.group(1).upper()
+
+    #         # Try using ip neighbor command as fallback
+    #         ip_cmd = ["ip", "neighbor", "show", ip]
+    #         if os.geteuid() != 0:
+    #             ip_cmd.insert(0, "sudo")
+
+    #         output = subprocess.check_output(ip_cmd, universal_newlines=True)
+    #         mac_match = re.search(r"(?i)([0-9A-F]{2}(?::[0-9A-F]{2}){5})", output)
+    #         return mac_match.group(1).upper() if mac_match else None
+
+    #     except (subprocess.CalledProcessError, IndexError):
+    #         return None
+
+    def get_interface_mac(self, interface: str) -> Optional[str]:
+        """Get MAC address of a network interface"""
+        try:
+            # Try using netifaces first
+            addrs = netifaces.ifaddresses(interface)
+            if netifaces.AF_LINK in addrs:
+                return addrs[netifaces.AF_LINK][0]['addr'].upper()
+
+            # Fallback to socket method
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            info = fcntl.ioctl(sock.fileno(), 0x8927, struct.pack('256s', interface[:15].encode()))
+            return ':'.join(['%02x' % b for b in info[18:24]]).upper()
+        except:
+            return None
+
+    def get_all_interface_macs(self) -> Dict[str, str]:
+        """Get MAC addresses of all network interfaces"""
+        interfaces = {}
+        for interface in netifaces.interfaces():
+            if interface != 'lo':  # Skip loopback
+                mac = self.get_interface_mac(interface)
+                if mac:
+                    interfaces[interface] = mac
+        return interfaces
+
+    def get_interface_by_ip(self, ip: str) -> Optional[str]:
+        """Get network interface name for an IP address"""
+        try:
+            for interface in netifaces.interfaces():
+                addrs = netifaces.ifaddresses(interface)
+                if netifaces.AF_INET in addrs:
+                    for addr in addrs[netifaces.AF_INET]:
+                        if addr['addr'] == ip:
+                            return interface
+        except:
+            return None
+        return None
+
     def get_mac_address(self, ip: str) -> Optional[str]:
-        """Get MAC address for an IP using arp command"""
+        """Enhanced MAC address detection"""
         if ip in ['0.0.0.0', '::', '*', '127.0.0.1', '::1']:
             return None
 
+        # For local IP, get MAC from interface
+        interface = self.get_interface_by_ip(ip)
+        if interface:
+            return self.get_interface_mac(interface)
+
         try:
-            # Run arp command
+            # Try multiple methods for remote MAC
+
+            # Method 1: arp command
             arp_cmd = ["arp", "-n", ip]
             if os.geteuid() != 0:
                 arp_cmd.insert(0, "sudo")
 
-            output = subprocess.check_output(arp_cmd, universal_newlines=True)
+            try:
+                output = subprocess.check_output(arp_cmd, universal_newlines=True)
+                mac_match = re.search(r"(?i)([0-9A-F]{2}(?::[0-9A-F]{2}){5})", output)
+                if mac_match:
+                    return mac_match.group(1).upper()
+            except:
+                pass
 
-            # Extract MAC address using regex
-            mac_match = re.search(r"(?i)([0-9A-F]{2}(?::[0-9A-F]{2}){5})", output)
-            if mac_match:
-                return mac_match.group(1).upper()
-
-            # Try using ip neighbor command as fallback
+            # Method 2: ip neighbor
             ip_cmd = ["ip", "neighbor", "show", ip]
             if os.geteuid() != 0:
                 ip_cmd.insert(0, "sudo")
 
-            output = subprocess.check_output(ip_cmd, universal_newlines=True)
-            mac_match = re.search(r"(?i)([0-9A-F]{2}(?::[0-9A-F]{2}){5})", output)
-            return mac_match.group(1).upper() if mac_match else None
+            try:
+                output = subprocess.check_output(ip_cmd, universal_newlines=True)
+                mac_match = re.search(r"(?i)([0-9A-F]{2}(?::[0-9A-F]{2}){5})", output)
+                if mac_match:
+                    return mac_match.group(1).upper()
+            except:
+                pass
 
-        except (subprocess.CalledProcessError, IndexError):
+            # Method 3: For local network, try ping first to ensure ARP entry
+            if ip.startswith(('192.168.', '10.', '172.')):
+                try:
+                    subprocess.run(["ping", "-c", "1", "-W", "1", ip], 
+                                 stdout=subprocess.DEVNULL, 
+                                 stderr=subprocess.DEVNULL)
+                    # Try ARP again after ping
+                    output = subprocess.check_output(["arp", "-n", ip], universal_newlines=True)
+                    mac_match = re.search(r"(?i)([0-9A-F]{2}(?::[0-9A-F]{2}){5})", output)
+                    if mac_match:
+                        return mac_match.group(1).upper()
+                except:
+                    pass
+
+        except Exception as e:
+            print(f"Debug - MAC detection error for {ip}: {str(e)}")
             return None
+
+        return None
 
     def resolve_domain(self, ip):
         """Resolve IP to domain with timeout"""
@@ -243,8 +350,23 @@ class NetworkMonitor:
         
         direction = 'OUTBOUND' if conn['remote_port'] in self.service_ports else 'INBOUND'
 
-        local_mac = self.get_mac_address(conn['local_addr'])
-        remote_mac = self.get_mac_address(conn['remote_addr'])
+        local_mac = None
+        remote_mac = None
+    
+        # Get local MAC
+        if conn['local_addr'] in ['0.0.0.0', '::', '*']:
+            interface = next(iter(self.interface_macs.values()), None)
+            local_mac = interface
+        else:
+            local_mac = self.get_mac_address(conn['local_addr'])
+            if not local_mac:
+                interface = self.get_interface_by_ip(conn['local_addr'])
+                if interface and interface in self.interface_macs:
+                    local_mac = self.interface_macs[interface]
+    
+        # Get remote MAC
+        if conn['remote_addr'].startswith(('192.168.', '10.', '172.')):
+            remote_mac = self.get_mac_address(conn['remote_addr'])
         
         # Log to main connection file
         conn_row = {
