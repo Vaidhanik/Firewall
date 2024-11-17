@@ -432,18 +432,7 @@ class NetworkMonitor:
         # Check for new and stopped applications
         new_apps = current_apps - self.active_apps
         stopped_apps = self.active_apps - current_apps
-
-        # for app in new_apps:
-        #     print(f"\n[+] New application detected: {app}")
-        #     if any(conn['program'] == app and self.get_service_type(self.resolve_domain(conn['remote_addr']), 
-        #            conn['remote_port']).startswith('EMAIL') for conn in connections):
-        #         print(f"    └─ Email-related activity detected")
-        #     if conn['program'] not in self.active_apps:
-        #         mac_info = f"\n    └─ Local MAC: {conn["local_mac"] or 'N/A'}"
-        #         if conn["remote_mac"]:
-        #             mac_info += f"\n    └─ Remote MAC: {conn["remote_mac"]}"
-        #         print(mac_info)
-
+        
         for app in new_apps:
             print(f"\n[+] New application detected: {app}")
             # Find the connection details for this app
