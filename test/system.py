@@ -34,9 +34,9 @@ def get_installed_apps() -> List[str]:
                             with winreg.OpenKey(registry_key, subkey_name) as subkey:
                                 app_name = winreg.QueryValueEx(subkey, "DisplayName")[0]
                                 apps.append(app_name)
-                        except (WindowsError, KeyError):
+                        except (OSError, KeyError):
                             continue
-            except WindowsError:
+            except OSError:
                 continue
         return apps
     
