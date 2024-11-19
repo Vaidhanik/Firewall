@@ -6,6 +6,7 @@ import json
 import fcntl
 import socket
 import struct
+import platform
 import datetime
 import netifaces
 import subprocess
@@ -13,40 +14,191 @@ from pathlib import Path
 from typing import Optional, Dict, List, Set
 from collections import defaultdict
 
-class NetworkMonitor:
-    def __init__(self):
-        # ... (previous __init__ code remains the same) ...
-        
-        # Add blocked IPs set
-        self.blocked_ips: Set[str] = set()
-        # Initialize firewall rules
-        self._initialize_firewall()
-    
-    def _initialize_firewall(self):
-        """Initialize firewall by flushing existing rules and setting up base rules"""
+class FirewallManager:
+    """Abstract base class for firewall management"""
+    def initialize(self):
+        raise NotImplementedError
+
+    def block_ip(self, ip: str) -> bool:
+        raise NotImplementedError
+
+    def unblock_ip(self, ip: str) -> bool:
+        raise NotImplementedError
+
+    def cleanup(self):
+        raise NotImplementedError
+
+class WindowsFirewall(FirewallManager):
+    def initialize(self):
         try:
-            # Ensure we have root privileges
+            # Check if we have admin privileges
+            if not self._is_admin():
+                print("Warning: Administrator privileges required for firewall management")
+                return False
+
+            # Create a new firewall rule group
+            subprocess.run([
+                "netsh", "advfirewall", "set", "allprofiles", "state", "on"
+            ], check=True)
+            return True
+        except subprocess.CalledProcessError as e:
+            print(f"Error initializing Windows Firewall: {e}")
+            return False
+
+    def block_ip(self, ip: str) -> bool:
+        try:
+            rule_name = f"BlockIP_{ip.replace('.', '_')}"
+            
+            # Block outbound
+            subprocess.run([
+                "netsh", "advfirewall", "firewall", "add", "rule",
+                "name=" + rule_name + "_out",
+                "dir=out",
+                "action=block",
+                "remoteip=" + ip
+            ], check=True)
+
+            # Block inbound
+            subprocess.run([
+                "netsh", "advfirewall", "firewall", "add", "rule",
+                "name=" + rule_name + "_in",
+                "dir=in",
+                "action=block",
+                "remoteip=" + ip
+            ], check=True)
+
+            return True
+        except subprocess.CalledProcessError as e:
+            print(f"Error blocking IP in Windows Firewall: {e}")
+            return False
+
+    def unblock_ip(self, ip: str) -> bool:
+        try:
+            rule_name = f"BlockIP_{ip.replace('.', '_')}"
+            
+            # Remove outbound rule
+            subprocess.run([
+                "netsh", "advfirewall", "firewall", "delete", "rule",
+                "name=" + rule_name + "_out"
+            ], check=True)
+
+            # Remove inbound rule
+            subprocess.run([
+                "netsh", "advfirewall", "firewall", "delete", "rule",
+                "name=" + rule_name + "_in"
+            ], check=True)
+
+            return True
+        except subprocess.CalledProcessError as e:
+            print(f"Error unblocking IP in Windows Firewall: {e}")
+            return False
+
+    def cleanup(self):
+        try:
+            # Clean up all rules created by this program
+            subprocess.run([
+                "netsh", "advfirewall", "firewall", "delete", "rule",
+                "name=BlockIP_*"
+            ], check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"Error cleaning up Windows Firewall rules: {e}")
+
+    def _is_admin(self):
+        try:
+            return os.getuid() == 0
+        except AttributeError:
+            import ctypes
+            return ctypes.windll.shell32.IsUserAnAdmin() != 0
+
+class LinuxFirewall(FirewallManager):
+    def initialize(self):
+        try:
             if os.geteuid() != 0:
                 print("Warning: Root privileges required for firewall management")
-                return
+                return False
 
-            # Flush existing rules
             subprocess.run(["iptables", "-F"], check=True)
-            
-            # Set default policies
             subprocess.run(["iptables", "-P", "INPUT", "ACCEPT"], check=True)
             subprocess.run(["iptables", "-P", "OUTPUT", "ACCEPT"], check=True)
-            subprocess.run(["iptables", "-P", "FORWARD", "ACCEPT"], check=True)
-            
-            print("Firewall initialized successfully")
+            return True
         except subprocess.CalledProcessError as e:
-            print(f"Error initializing firewall: {e}")
-        except Exception as e:
-            print(f"Unexpected error in firewall initialization: {e}")
+            print(f"Error initializing iptables: {e}")
+            return False
+
+    def block_ip(self, ip: str) -> bool:
+        try:
+            # Block outbound
+            subprocess.run([
+                "iptables", "-A", "OUTPUT", 
+                "-d", ip, 
+                "-j", "DROP"
+            ], check=True)
+
+            # Block inbound
+            subprocess.run([
+                "iptables", "-A", "INPUT", 
+                "-s", ip, 
+                "-j", "DROP"
+            ], check=True)
+
+            return True
+        except subprocess.CalledProcessError as e:
+            print(f"Error blocking IP in iptables: {e}")
+            return False
+
+    def unblock_ip(self, ip: str) -> bool:
+        try:
+            # Remove outbound block
+            subprocess.run([
+                "iptables", "-D", "OUTPUT", 
+                "-d", ip, 
+                "-j", "DROP"
+            ], check=True)
+
+            # Remove inbound block
+            subprocess.run([
+                "iptables", "-D", "INPUT", 
+                "-s", ip, 
+                "-j", "DROP"
+            ], check=True)
+
+            return True
+        except subprocess.CalledProcessError as e:
+            print(f"Error unblocking IP in iptables: {e}")
+            return False
+
+    def cleanup(self):
+        try:
+            subprocess.run(["iptables", "-F"], check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"Error cleaning up iptables rules: {e}")
+
+class NetworkMonitor:
+    def __init__(self):
+        self.script_dir = Path(__file__).parent.absolute()
+        self.logs_dir = self.script_dir / 'logs'
+        self.logs_dir.mkdir(exist_ok=True)
+        
+        self.active_apps = set()
+        self.start_time = datetime.datetime.now()
+        self.blocked_ips: Set[str] = set()
+
+        # Initialize OS-specific firewall
+        self.os_type = platform.system().lower()
+        if self.os_type == "windows":
+            self.firewall = WindowsFirewall()
+        else:  # Linux
+            self.firewall = LinuxFirewall()
+        
+        # Initialize firewall
+        self.firewall.initialize()
+        
+        # Rest of your initialization code...
+        [Previous initialization code remains the same]
 
     def block_ip(self, ip: str) -> bool:
         """
-        Block outgoing traffic to a specific IP address
+        Block outgoing traffic to a specific IP address (cross-platform)
         
         Args:
             ip (str): IP address to block
@@ -59,41 +211,20 @@ class NetworkMonitor:
                 print(f"Invalid IP address format: {ip}")
                 return False
 
-            if os.geteuid() != 0:
-                print("Root privileges required for blocking IPs")
-                return False
-
-            # Add rules to block outgoing traffic to the IP
-            subprocess.run([
-                "iptables", "-A", "OUTPUT", 
-                "-d", ip, 
-                "-j", "DROP"
-            ], check=True)
-
-            # Add rules to block incoming traffic from the IP
-            subprocess.run([
-                "iptables", "-A", "INPUT", 
-                "-s", ip, 
-                "-j", "DROP"
-            ], check=True)
-
-            self.blocked_ips.add(ip)
-            print(f"Successfully blocked IP: {ip}")
-            
-            # Log the blocking action
-            self._log_blocking_action(ip, "BLOCK")
-            return True
-
-        except subprocess.CalledProcessError as e:
-            print(f"Error blocking IP {ip}: {e}")
+            if self.firewall.block_ip(ip):
+                self.blocked_ips.add(ip)
+                print(f"Successfully blocked IP: {ip}")
+                self._log_blocking_action(ip, "BLOCK")
+                return True
             return False
+
         except Exception as e:
             print(f"Unexpected error while blocking IP {ip}: {e}")
             return False
 
     def unblock_ip(self, ip: str) -> bool:
         """
-        Unblock previously blocked IP address
+        Unblock previously blocked IP address (cross-platform)
         
         Args:
             ip (str): IP address to unblock
@@ -106,33 +237,13 @@ class NetworkMonitor:
                 print(f"Invalid IP address format: {ip}")
                 return False
 
-            if os.geteuid() != 0:
-                print("Root privileges required for unblocking IPs")
-                return False
-
-            # Remove blocking rules
-            subprocess.run([
-                "iptables", "-D", "OUTPUT", 
-                "-d", ip, 
-                "-j", "DROP"
-            ], check=True)
-
-            subprocess.run([
-                "iptables", "-D", "INPUT", 
-                "-s", ip, 
-                "-j", "DROP"
-            ], check=True)
-
-            self.blocked_ips.remove(ip)
-            print(f"Successfully unblocked IP: {ip}")
-            
-            # Log the unblocking action
-            self._log_blocking_action(ip, "UNBLOCK")
-            return True
-
-        except subprocess.CalledProcessError as e:
-            print(f"Error unblocking IP {ip}: {e}")
+            if self.firewall.unblock_ip(ip):
+                self.blocked_ips.remove(ip)
+                print(f"Successfully unblocked IP: {ip}")
+                self._log_blocking_action(ip, "UNBLOCK")
+                return True
             return False
+
         except Exception as e:
             print(f"Unexpected error while unblocking IP {ip}: {e}")
             return False
@@ -154,55 +265,30 @@ class NetworkMonitor:
         if not log_file.exists():
             with open(log_file, 'w', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow(['timestamp', 'ip', 'action'])
+                writer.writerow(['timestamp', 'ip', 'action', 'platform'])
         
         # Log the action
         with open(log_file, 'a', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow([timestamp, ip, action])
+            writer.writerow([timestamp, ip, action, self.os_type])
 
     def get_blocked_ips(self) -> List[str]:
         """Get list of currently blocked IPs"""
         return list(self.blocked_ips)
 
-    # ... (rest of the original code remains the same) ...
-
-    def monitor(self):
-        """Main monitoring loop with blocking check"""
-        print("\nNetwork Monitor Started")
-        print(f"Logs directory: {self.logs_dir}")
-        print("\nMonitoring network connections (Press Ctrl+C to stop)...")
-        print("-" * 80)
-        
-        try:
-            while True:
-                connections = self.get_connections()
-                for conn in connections:
-                    if conn['state'] == 'ESTABLISHED' or conn['protocol'] == 'udp':
-                        # Check if the remote IP is blocked
-                        if conn['remote_addr'] in self.blocked_ips:
-                            print(f"Blocked connection attempt to {conn['remote_addr']} by {conn['program']}")
-                        self.log_connection(conn)
-                self.update_stats(connections)
-                time.sleep(1)
-
-        except KeyboardInterrupt:
-            print("\n\nStopping Monitor...")
-            self._cleanup()
-            # ... (rest of the original cleanup code) ...
-
     def _cleanup(self):
         """Cleanup firewall rules on exit"""
         try:
-            if os.geteuid() == 0:
-                # Remove all blocking rules
-                subprocess.run(["iptables", "-F"], check=True)
-                print("Firewall rules cleaned up successfully")
+            self.firewall.cleanup()
+            print("Firewall rules cleaned up successfully")
         except Exception as e:
             print(f"Error cleaning up firewall rules: {e}")
 
+    # ... (rest of the original NetworkMonitor class remains the same) ...
+
 if __name__ == "__main__":
     monitor = NetworkMonitor()
-    # Example of blocking an IP
+    
+    # Example usage:
     # monitor.block_ip("1.2.3.4")
     monitor.monitor()
