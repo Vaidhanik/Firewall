@@ -194,7 +194,7 @@ class NetworkMonitor:
         self.firewall.initialize()
         
         # Rest of your initialization code...
-        [Previous initialization code remains the same]
+        # [Previous initialization code remains the same]
 
     def block_ip(self, ip: str) -> bool:
         """
