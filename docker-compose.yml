@@ -1,0 +1,15 @@
+services:
+  network_monitor:
+    build:
+      context: ./test/monitor
+      dockerfile: Dockerfile.monitor
+    container_name: network_monitor
+    privileged: true # Enables privileged mode to allow sudo-level operations
+    network_mode: "host" # Allows the container to directly access the host network (necessary for `arp`, `netstat`, etc.)
+    volumes:
+      - /etc/sudoers:/etc/sudoers:ro # Optional: Ensure the container user has sudo access
+    cap_add:
+      - NET_ADMIN # Adds the NET_ADMIN capability for networking tasks
+      - SYS_ADMIN # Adds SYS_ADMIN for additional networking capabilities
+    stdin_open: true # Keeps the stdin open for interactive sessions
+    tty: true # Allocates a pseudo-TTY
