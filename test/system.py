@@ -1,9 +1,9 @@
 import os
 import glob
+import psutil
 import platform
 import subprocess
 from typing import List, Set
-import psutil
 
 class ApplicationDetector:
     @staticmethod
