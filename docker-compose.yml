@@ -1,7 +1,7 @@
 services:
   network_monitor:
     build:
-      context: ./test
+      context: ./src
       dockerfile: Dockerfile.firewall
     container_name: network_monitor
     privileged: true # Enables privileged mode to allow sudo-level operations
@@ -10,7 +10,6 @@ services:
     volumes:
       # - /sys:/sys:ro
       # - /proc:/proc:ro
-      # - /etc/sudoers:/etc/sudoers:ro # Optional: Ensure the container user has sudo access
       - ./test/system.py:/app/system.py
       - ./test/monitor.py:/app/monitor.py
       - ./test/inception.py:/app/inception.py
