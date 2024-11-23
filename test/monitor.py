@@ -484,9 +484,10 @@ class NetworkMonitor:
         # Kernel and system information
         log_header("5. System Information")
         try:
+            # ERROR::> `uname_output` Not getting detected
             uname_output = subprocess.check_output(["uname", "-a"], universal_newlines=True)
             logging.info("System information retrieved successfully.")
-            logging.info(uname_output.strip())
+            logging.info(uname_output)
         except Exception as e:
             logging.error(f"Failed to retrieve system information: {e}")
 
@@ -496,6 +497,9 @@ class NetworkMonitor:
         """Main monitoring loop"""
         print("\nNetwork Monitor Started")
         print(f"Logs directory: {self.logs_dir}")
+
+        self.check_system_access()
+
         print("\nMonitoring network connections (Press Ctrl+C to stop)...")
         print("-" * 80)
         
@@ -545,9 +549,9 @@ logging.basicConfig(
 
 def log_header(header):
     """Helper function to log a header"""
-    logging.info("\n" + "=" * 40)
-    logging.info(f"{header}")
-    logging.info("=" * 40)
+    print("\n" + "=" * 40)
+    print(f"{header}")
+    print("=" * 40)
 
 
 if __name__ == "__main__":

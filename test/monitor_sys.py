@@ -446,9 +446,6 @@ class NetworkMonitor:
         """Main monitoring loop"""
         print("\nNetwork Monitor Started")
         print(f"Logs directory: {self.logs_dir}")
-
-        self.check_system_access()
-
         print("\nMonitoring network connections (Press Ctrl+C to stop)...")
         print("-" * 80)
         
