@@ -1,15 +1,27 @@
 services:
   network_monitor:
     build:
-      context: ./test/monitor
-      dockerfile: Dockerfile.monitor
+      context: ./test
+      dockerfile: Dockerfile.firewall
     container_name: network_monitor
     privileged: true # Enables privileged mode to allow sudo-level operations
     network_mode: "host" # Allows the container to directly access the host network (necessary for `arp`, `netstat`, etc.)
+    pid: "host"
     volumes:
-      - /etc/sudoers:/etc/sudoers:ro # Optional: Ensure the container user has sudo access
+      # - /sys:/sys:ro
+      # - /proc:/proc:ro
+      # - /etc/sudoers:/etc/sudoers:ro # Optional: Ensure the container user has sudo access
+      - ./test/system.py:/app/system.py
+      - ./test/monitor.py:/app/monitor.py
+      - ./test/inception.py:/app/inception.py
+      - ./test/requirements.txt:/app/requirements.txt
+      - ./test/network_control.py:/app/network_control.py
     cap_add:
       - NET_ADMIN # Adds the NET_ADMIN capability for networking tasks
       - SYS_ADMIN # Adds SYS_ADMIN for additional networking capabilities
+      # - NET_RAW
+      # - SYS_PTRACE
+    # security_opt:
+    #   - apparmor=unconfined
     stdin_open: true # Keeps the stdin open for interactive sessions
     tty: true # Allocates a pseudo-TTY
