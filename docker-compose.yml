@@ -10,11 +10,14 @@ services:
     volumes:
       # - /sys:/sys:ro
       # - /proc:/proc:ro
-      - ./test/system.py:/app/system.py
-      - ./test/monitor.py:/app/monitor.py
-      - ./test/inception.py:/app/inception.py
-      - ./test/requirements.txt:/app/requirements.txt
-      - ./test/network_control.py:/app/network_control.py
+      - ./src/system.py:/app/system.py
+      - ./src/server.py:/app/server.py
+      - ./src/monitor.py:/app/monitor.py
+      - ./src/interceptor.py:/app/interceptor.py
+      - ./src/requirements.txt:/app/requirements.txt
+      - ./src/network_control.py:/app/network_control.py
+    ports:
+      - 5000:5000
     cap_add:
       - NET_ADMIN # Adds the NET_ADMIN capability for networking tasks
       - SYS_ADMIN # Adds SYS_ADMIN for additional networking capabilities
@@ -22,5 +25,7 @@ services:
       # - SYS_PTRACE
     # security_opt:
     #   - apparmor=unconfined
+    command: python server.py
     stdin_open: true # Keeps the stdin open for interactive sessions
     tty: true # Allocates a pseudo-TTY
+    restart: unless-stopped

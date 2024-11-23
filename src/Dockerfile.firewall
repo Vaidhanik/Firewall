@@ -7,13 +7,14 @@ RUN apt-get update && apt-get install -y \
     iputils-ping \
     sudo \
     procps \
+    iptables \
     && rm -rf /var/lib/apt/lists/*
 
 # Set up the working directory
 WORKDIR /app
 
 # Install Python dependencies
-COPY requirements.txt /app/
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 RUN mkdir -p /app/logs && chmod 777 /app/logs
@@ -25,5 +26,9 @@ RUN chmod +x /access.sh
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+COPY . .
+
+EXPOSE 5000
+
 # Set the entrypoint
-ENTRYPOINT ["/entrypoint.sh"]
+# ENTRYPOINT ["/entrypoint.sh"]
