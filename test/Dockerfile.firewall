@@ -1,0 +1,29 @@
+FROM python:3.9-slim
+
+# Install necessary system packages
+RUN apt-get update && apt-get install -y \
+    net-tools \
+    iproute2 \
+    iputils-ping \
+    sudo \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set up the working directory
+WORKDIR /app
+
+# Install Python dependencies
+COPY requirements.txt /app/
+RUN pip install --no-cache-dir -r requirements.txt
+
+RUN mkdir -p /app/logs && chmod 777 /app/logs
+
+COPY access.sh /access.sh
+RUN chmod +x /access.sh
+
+# Copy entrypoint script
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Set the entrypoint
+ENTRYPOINT ["/entrypoint.sh"]
