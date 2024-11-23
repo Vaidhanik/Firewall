@@ -1,6 +1,6 @@
 import os
 import platform
-from monitorv2 import NetworkMonitor
+from monitor_sys import NetworkMonitor
 from inception import FirewallManager
 from system import get_installed_apps
 from typing import Dict, List, Set
