@@ -120,14 +120,14 @@ class NetworkMonitor:
         try:
             # Get TCP connections
             tcp_cmd = ["netstat", "-tnp"]
-            # if os.geteuid() != 0:
-            #     tcp_cmd.insert(0, "sudo")
+            if os.geteuid() != 0:
+                tcp_cmd.insert(0, "sudo")
             tcp_output = subprocess.check_output(tcp_cmd, universal_newlines=True, stderr=subprocess.DEVNULL)
             
             # Get UDP connections
             udp_cmd = ["netstat", "-unp"]
-            # if os.geteuid() != 0:
-            #     udp_cmd.insert(0, "sudo")
+            if os.geteuid() != 0:
+                udp_cmd.insert(0, "sudo")
             udp_output = subprocess.check_output(udp_cmd, universal_newlines=True, stderr=subprocess.DEVNULL)
             
             # Process both outputs
@@ -256,8 +256,8 @@ class NetworkMonitor:
 
             # Method 1: arp command
             arp_cmd = ["arp", "-n", ip]
-            # if os.geteuid() != 0:
-            #     arp_cmd.insert(0, "sudo")
+            if os.geteuid() != 0:
+                arp_cmd.insert(0, "sudo")
 
             try:
                 output = subprocess.check_output(arp_cmd, universal_newlines=True, stderr=subprocess.DEVNULL)
@@ -269,8 +269,8 @@ class NetworkMonitor:
 
             # Method 2: ip neighbor
             ip_cmd = ["ip", "neighbor", "show", ip]
-            # if os.geteuid() != 0:
-            #     ip_cmd.insert(0, "sudo")
+            if os.geteuid() != 0:
+                ip_cmd.insert(0, "sudo")
 
             try:
                 output = subprocess.check_output(ip_cmd, universal_newlines=True, stderr=subprocess.DEVNULL)
@@ -443,63 +443,10 @@ class NetworkMonitor:
                 }
                 writer.writerow(row)
 
-    def check_system_access(self):
-        """Check system access permissions"""
-        logging.info("Running system access checks...\n")
-
-        log_header("1. Process Listing Access")
-        try:
-            ps_output = subprocess.check_output(["ps", "aux"], universal_newlines=True)
-            logging.info("✓ Process listing access: SUCCESS")
-            logging.info("Sample process listing:\n" + "\n".join(ps_output.splitlines()[:10]))
-        except Exception as e:
-            logging.error(f"✗ Process listing access: FAILED\nError: {e}")
-
-        log_header("2. Network Interfaces Access")
-        try:
-            netif_output = subprocess.check_output(["ip", "link"], universal_newlines=True)
-            logging.info("✓ Network interface access: SUCCESS")
-            for line in netif_output.strip().split("\n"):
-                logging.info(line)
-        except Exception as e:
-            logging.error(f"✗ Network interface access: FAILED\nError: {e}")
-
-        log_header("3. Netstat Access")
-        try:
-            netstat_output = subprocess.check_output(["netstat", "-tuln"], universal_newlines=True)
-            logging.info("✓ Netstat access: SUCCESS")
-            logging.info("Sample active connections:\n" + "\n".join(netstat_output.splitlines()[:10]))
-        except Exception as e:
-            logging.error(f"✗ Netstat access: FAILED\nError: {e}")
-
-        log_header("4. Process Environment Information")
-        try:
-            logging.info(f"UID: {os.getuid()}")
-            logging.info(f"GID: {os.getgid()}")
-            logging.info(f"PID: {os.getpid()}")
-            logging.info(f"Parent PID: {os.getppid()}")
-        except Exception as e:
-            logging.error(f"Failed to retrieve process environment info: {e}")
-
-        # Kernel and system information
-        log_header("5. System Information")
-        try:
-            # ERROR::> `uname_output` Not getting detected
-            uname_output = subprocess.check_output(["uname", "-a"], universal_newlines=True)
-            logging.info("System information retrieved successfully.")
-            logging.info(uname_output)
-        except Exception as e:
-            logging.error(f"Failed to retrieve system information: {e}")
-
-        logging.info("\nSystem access checks completed.")
-
     def monitor(self):
         """Main monitoring loop"""
         print("\nNetwork Monitor Started")
         print(f"Logs directory: {self.logs_dir}")
-
-        self.check_system_access()
-
         print("\nMonitoring network connections (Press Ctrl+C to stop)...")
         print("-" * 80)
         
@@ -541,6 +488,64 @@ class NetworkMonitor:
             print(f"- Email Traffic: {self.email_file.name}")
             print(f"- Summary: {summary_file.name}")
 
+    def _cleanup(self):
+        """Cleanup monitoring resources and save final state"""
+        try:
+            # Calculate monitoring duration
+            end_time = datetime.datetime.now()
+            duration = end_time - self.start_time
+
+            # Create final summary
+            summary = {
+                'monitoring_session': {
+                    'start_time': self.start_time.isoformat(),
+                    'end_time': end_time.isoformat(),
+                    'duration_seconds': duration.total_seconds()
+                },
+                'connection_stats': {
+                    'total_connections_logged': 0,
+                    'unique_applications': len(self.active_apps),
+                    'applications': list(self.active_apps)
+                },
+                'log_files': {
+                    'connections': str(self.conn_file),
+                    'statistics': str(self.stats_file),
+                    'email_traffic': str(self.email_file)
+                }
+            }
+
+            # Count total connections from the connection log
+            try:
+                with open(self.conn_file, 'r') as f:
+                    # Subtract 1 for header row
+                    summary['connection_stats']['total_connections_logged'] = sum(1 for _ in f) - 1
+            except:
+                pass
+
+            # Save summary to JSON
+            summary_file = self.logs_dir / f'monitor_summary_{end_time.strftime("%Y%m%d_%H%M%S")}.json'
+            with open(summary_file, 'w') as f:
+                json.dump(summary, f, indent=2)
+
+            # Log final statistics
+            print("\nNetwork Monitor Cleanup:")
+            print(f"Session Duration: {duration}")
+            print(f"Total Applications Monitored: {len(self.active_apps)}")
+            print("\nLog Files:")
+            print(f"- Connections: {self.conn_file.name}")
+            print(f"- Statistics: {self.stats_file.name}")
+            print(f"- Email Traffic: {self.email_file.name}")
+            print(f"- Summary: {summary_file.name}")
+
+            # Close any open file handles (if you have any)
+            # For example, if you're using logging:
+            for handler in logging.getLogger().handlers[:]:
+                handler.close()
+                logging.getLogger().removeHandler(handler)
+
+        except Exception as e:
+            print(f"Error during cleanup: {e}")
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -552,7 +557,6 @@ def log_header(header):
     print("\n" + "=" * 40)
     print(f"{header}")
     print("=" * 40)
-
 
 if __name__ == "__main__":
     monitor = NetworkMonitor()
