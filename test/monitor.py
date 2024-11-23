@@ -6,6 +6,7 @@ import json
 import fcntl
 import socket
 import struct
+import logging
 import datetime
 import netifaces
 import subprocess
@@ -486,6 +487,76 @@ class NetworkMonitor:
             print(f"- Statistics: {self.stats_file.name}")
             print(f"- Email Traffic: {self.email_file.name}")
             print(f"- Summary: {summary_file.name}")
+
+    def _cleanup(self):
+        """Cleanup monitoring resources and save final state"""
+        try:
+            # Calculate monitoring duration
+            end_time = datetime.datetime.now()
+            duration = end_time - self.start_time
+
+            # Create final summary
+            summary = {
+                'monitoring_session': {
+                    'start_time': self.start_time.isoformat(),
+                    'end_time': end_time.isoformat(),
+                    'duration_seconds': duration.total_seconds()
+                },
+                'connection_stats': {
+                    'total_connections_logged': 0,
+                    'unique_applications': len(self.active_apps),
+                    'applications': list(self.active_apps)
+                },
+                'log_files': {
+                    'connections': str(self.conn_file),
+                    'statistics': str(self.stats_file),
+                    'email_traffic': str(self.email_file)
+                }
+            }
+
+            # Count total connections from the connection log
+            try:
+                with open(self.conn_file, 'r') as f:
+                    # Subtract 1 for header row
+                    summary['connection_stats']['total_connections_logged'] = sum(1 for _ in f) - 1
+            except:
+                pass
+
+            # Save summary to JSON
+            summary_file = self.logs_dir / f'monitor_summary_{end_time.strftime("%Y%m%d_%H%M%S")}.json'
+            with open(summary_file, 'w') as f:
+                json.dump(summary, f, indent=2)
+
+            # Log final statistics
+            print("\nNetwork Monitor Cleanup:")
+            print(f"Session Duration: {duration}")
+            print(f"Total Applications Monitored: {len(self.active_apps)}")
+            print("\nLog Files:")
+            print(f"- Connections: {self.conn_file.name}")
+            print(f"- Statistics: {self.stats_file.name}")
+            print(f"- Email Traffic: {self.email_file.name}")
+            print(f"- Summary: {summary_file.name}")
+
+            # Close any open file handles (if you have any)
+            # For example, if you're using logging:
+            for handler in logging.getLogger().handlers[:]:
+                handler.close()
+                logging.getLogger().removeHandler(handler)
+
+        except Exception as e:
+            print(f"Error during cleanup: {e}")
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler()]
+)
+
+def log_header(header):
+    """Helper function to log a header"""
+    print("\n" + "=" * 40)
+    print(f"{header}")
+    print("=" * 40)
 
 if __name__ == "__main__":
     monitor = NetworkMonitor()

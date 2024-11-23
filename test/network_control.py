@@ -17,7 +17,7 @@ class NetworkController:
         self.installed_apps = self.load_installed_apps()
         
         # Setup logging directory
-        self.logs_dir = Path('logs')
+        self.logs_dir = Path('test/logs')
         self.logs_dir.mkdir(exist_ok=True)
         
         # Cache for faster rule lookup
@@ -280,13 +280,14 @@ class NetworkController:
             'monitored_apps': len(self.app_states)
         }
 
-    def _cleanup(self) -> None:
-        """Cleanup and save final state"""
-        # Save monitor logs
-        self.monitor._cleanup()
-        
-        # Save final statistics and state
+    def _cleanup(self):
+        """Enhanced cleanup with better error handling"""
         try:
+            # First try to cleanup monitor
+            if hasattr(self.monitor, '_cleanup'):
+                self.monitor._cleanup()
+                
+            # Save controller state
             final_state = {
                 'timestamp': datetime.now().isoformat(),
                 'statistics': self.get_statistics(),
@@ -304,10 +305,22 @@ class NetworkController:
             with open(state_file, 'w') as f:
                 json.dump(final_state, f, indent=2)
                 
-            print(f"\nFinal state saved to: {state_file}")
+            print(f"\nController state saved to: {state_file}")
             
+            # Cleanup interceptor rules if needed
+            if hasattr(self, 'interceptor'):
+                active_blocks = self.get_active_blocks()
+                if active_blocks:
+                    print("\nCleaning up firewall rules...")
+                    for block in active_blocks:
+                        try:
+                            self.unblock_app_network(block['id'])
+                        except:
+                            print(f"Failed to remove rule for {block['app']} -> {block['target']}")
+                            
         except Exception as e:
-            print(f"Error saving controller state: {e}")
+            print(f"\nWarning: Cleanup encountered errors: {e}")
+            print("Some resources may need manual cleanup")
 
     def display_statistics(self):
         """Display current system statistics"""
