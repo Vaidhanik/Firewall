@@ -1,4 +1,4 @@
 .firewall/
 logs/
 target/
-intercep*
+intercep*.db
