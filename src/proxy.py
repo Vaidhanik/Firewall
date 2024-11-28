@@ -138,6 +138,7 @@ class ProxyInterceptor:
                     app_name TEXT NOT NULL,
                     target TEXT NOT NULL,
                     target_type TEXT NOT NULL,
+                    resolved_ips TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     active BOOLEAN DEFAULT 1
                 )

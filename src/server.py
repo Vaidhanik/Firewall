@@ -320,6 +320,19 @@ def get_logs():
 
 def main():
     try:
+        # Initialize and start monitor
+        logger.info("Starting network monitor...")
+        if controller.start_detached_monitor():
+            logger.info("Network monitor started successfully")
+        else:
+            logger.warning("Failed to start network monitor")
+
+        # Initialize firewall
+        initialize_firewall()
+        
+        # Run the API server
+        logger.info("Starting API server...")
+        
         # Run the API server
         app.run(
             host='0.0.0.0',
