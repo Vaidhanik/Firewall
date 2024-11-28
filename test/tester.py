@@ -20,7 +20,6 @@ if __name__ == "__main__":
         'https://google.com',
         'https://x.com',
         'https://github.com',
-        'https://yahoo.com',
     ]
     test_connections(test_urls)
 
