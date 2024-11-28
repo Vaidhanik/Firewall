@@ -74,26 +74,26 @@ class NetworkInterceptor:
         try:
             # Get the actual user ID (not root)
             user_id = int(os.environ.get('SUDO_UID', os.getuid()))
+
+            # Get full path of the application
+            try:
+                app_path = subprocess.check_output(['which', app_path]).decode().strip()
+                process_name = os.path.basename(app_path)
+            except subprocess.CalledProcessError:
+                self.logger.error(f"Could not find path for {app_path}")
+                return False
             
             # Use appropriate command based on IP version
             iptables_cmd = 'ip6tables' if ip_version == 'ipv6' else 'iptables'
             icmp_protocol = 'icmpv6' if ip_version == 'ipv6' else 'icmp'
             
             # Create a unique comment for this rule
-            comment = f"block_{app_path.replace('/', '_')}_{target_ip}"
+            comment = f"block_{process_name}_{target_ip}"
             
             if action == 'add':
-                # First remove any existing rules for this target
-                try:
-                    subprocess.run(
-                        ['sudo', iptables_cmd, '-L', 'OUTPUT', '-n'],
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        check=True
-                    )
-                except subprocess.CalledProcessError:
-                    self.logger.error(f"{iptables_cmd} not available")
-                    return False
+                self._remove_existing_rules(iptables_cmd, process_name, target_ip)
+
+                rules_to_add = []
                 
                 # Define rules based on IP version
                 if ip_version == 'ipv6':
@@ -105,6 +105,7 @@ class NetworkInterceptor:
                             '-p', 'tcp',
                             '-d', target_ip,
                             '-m', 'owner', '--uid-owner', str(user_id),
+                            '-m', 'conntrack', '--ctstate', 'NEW,ESTABLISHED',
                             '-m', 'comment', '--comment', comment,
                             '-j', 'DROP'
                         ],
@@ -163,6 +164,7 @@ class NetworkInterceptor:
                             '-j', 'DROP'
                         ]
                     ]
+
                 
                 # Add each rule
                 for rule_cmd in rules_to_add:
@@ -173,28 +175,8 @@ class NetworkInterceptor:
                         return False
                         
             else:  # Remove rules
-                try:
-                    # List current rules
-                    rules = subprocess.check_output(
-                        ['sudo', iptables_cmd, '-L', 'OUTPUT', '--line-numbers', '-n']
-                    ).decode()
-                    
-                    # Find and remove rules containing our target IP and comment
-                    for line in reversed(rules.split('\n')):
-                        if target_ip in line and comment in line:
-                            try:
-                                rule_num = line.split()[0]
-                                subprocess.run(
-                                    ['sudo', iptables_cmd, '-D', 'OUTPUT', rule_num],
-                                    check=True
-                                )
-                            except (IndexError, ValueError, subprocess.CalledProcessError):
-                                continue
-                                
-                except subprocess.CalledProcessError as e:
-                    self.logger.error(f"Error removing {iptables_cmd} rules: {e}")
-                    return False
-                    
+                self._remove_existing_rules(iptables_cmd, app_path, target_ip)     
+
             self.logger.info(f"{'Added' if action == 'add' else 'Removed'} {iptables_cmd} rules for {app_path} -> {target_ip}")
             return True
             
@@ -202,6 +184,39 @@ class NetworkInterceptor:
             self.logger.error(f"Error managing {iptables_cmd} rules: {e}")
             return False
         
+    def _remove_existing_rules(self, iptables_cmd: str, process_name: str, target_ip: str):
+        """Remove existing rules for the process and target combination"""
+        try:
+            # List current rules with line numbers
+            output = subprocess.check_output(
+                ['sudo', iptables_cmd, '-L', 'OUTPUT', '-n', '--line-numbers'],
+                stderr=subprocess.PIPE
+            ).decode()  
+
+            # Find rules matching our process and target
+            rule_numbers = []
+            for line in output.split('\n'):
+                if process_name in line and target_ip in line:
+                    try:
+                        rule_num = line.split()[0]
+                        rule_numbers.append(int(rule_num))
+                    except (IndexError, ValueError):
+                        continue    
+
+            # Remove rules in reverse order (to keep line numbers valid)
+            for rule_num in sorted(rule_numbers, reverse=True):
+                try:
+                    subprocess.run(
+                        ['sudo', iptables_cmd, '-D', 'OUTPUT', str(rule_num)],
+                        check=True
+                    )
+                    self.logger.info(f"Removed rule number {rule_num}")
+                except subprocess.CalledProcessError as e:
+                    self.logger.error(f"Failed to remove rule {rule_num}: {e}")
+
+        except subprocess.CalledProcessError as e:
+                self.logger.error(f"Error removing existing rules: {e}")
+     
     def _create_windows_rule(self, app_path: str, target_ip: str, action: str = 'add'):
         """Create Windows Firewall rule"""
         try:
