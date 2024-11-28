@@ -9,14 +9,22 @@ from monitor import NetworkMonitor
 from system import get_installed_apps
 from interceptor import NetworkInterceptor
 from typing import Dict, List, Set, Optional, Tuple
+
+from proxy import ProxyInterceptor
+import subprocess
+import threading
 class NetworkController:
     def __init__(self):
         """Initialize the network control system"""
         # Initialize components
+        self.proxy = ProxyInterceptor()
         self.monitor = NetworkMonitor()
         self.interceptor = NetworkInterceptor()
         self.installed_apps = self.load_installed_apps()
         
+        self.proxy_thread = None
+        self.proxy_running = False
+
         # Setup logging directory
         self.logs_dir = Path('logs')
         self.logs_dir.mkdir(exist_ok=True)
@@ -49,6 +57,92 @@ class NetworkController:
         print(f"\nInitialized Network Controller")
         print(f"Found {len(self.installed_apps)} installed applications")
         print(f"Logs directory: {self.logs_dir}")
+
+    def start_proxy(self) -> bool:
+        """Start the proxy server"""
+        try:
+            if self.proxy_running:
+                print("\nProxy is already running!")
+                return False
+            
+            # Start the proxy
+            self.proxy.start()
+            self.proxy_running = True
+            
+            # Give it a moment to start
+            time.sleep(2)
+            
+            # Configure system proxy
+            self._configure_system_proxy()
+            print("\n✓ Proxy server started")
+            return True
+            
+        except Exception as e:
+            print(f"\nError starting proxy: {e}")
+            self.proxy_running = False
+            return False
+    
+    def stop_proxy(self) -> bool:
+        """Stop the proxy server"""
+        try:
+            if not self.proxy_running:
+                print("\nProxy is not running")
+                return False
+            
+            # Remove proxy settings first
+            self._remove_system_proxy()
+            
+            # Stop the proxy
+            self.proxy.stop()
+            self.proxy_running = False
+            
+            print("\n✓ Proxy server stopped")
+            return True
+            
+        except Exception as e:
+            print(f"\nError stopping proxy: {e}")
+            return False
+    
+    def _configure_system_proxy(self):
+        """Configure system to use our proxy"""
+        proxy_host = "127.0.0.1"
+        proxy_port = "8080"
+        
+        # Set environment variables
+        os.environ['HTTP_PROXY'] = f"http://{proxy_host}:{proxy_port}"
+        os.environ['HTTPS_PROXY'] = f"http://{proxy_host}:{proxy_port}"
+        
+        # Try to set system proxy settings
+        try:
+            if os.name == 'posix':  # Linux/Unix
+                # Try GNOME settings
+                subprocess.run([
+                    'gsettings', 'set', 'org.gnome.system.proxy', 'mode', 'manual'
+                ])
+                subprocess.run([
+                    'gsettings', 'set', 'org.gnome.system.proxy.http', 'host', 
+                    proxy_host
+                ])
+                subprocess.run([
+                    'gsettings', 'set', 'org.gnome.system.proxy.http', 'port', 
+                    proxy_port
+                ])
+        except Exception as e:
+            print(f"Warning: Could not set system proxy: {e}")
+
+    def _remove_system_proxy(self):
+        """Remove system proxy settings"""
+        try:
+            if os.name == 'posix':
+                subprocess.run([
+                    'gsettings', 'set', 'org.gnome.system.proxy', 'mode', 'none'
+                ])
+            
+            # Clear environment variables
+            os.environ.pop('HTTP_PROXY', None)
+            os.environ.pop('HTTPS_PROXY', None)
+        except Exception as e:
+            print(f"Warning: Could not remove system proxy: {e}")
 
     # def start_detached_monitor(self) -> bool:
     #     """Start monitoring in a separate process"""
@@ -233,7 +327,7 @@ class NetworkController:
         
         return True, None
 
-    def block_app_network(self, app_name: str, target: str) -> bool:
+    def _block_app_network(self, app_name: str, target: str) -> bool:
         """Block application from accessing specific target"""
         # Validate app existence
         if app_name not in self.installed_apps:
@@ -265,8 +359,18 @@ class NetworkController:
             return True
             
         return False
+    
+    def block_app_network(self, app_name: str, target: str) -> bool:
+        """Enhanced block method using both iptables and proxy"""
+        result = self._block_app_network(app_name, target)
+        
+        # Also add rule to proxy
+        if result:
+            self.proxy.add_blocking_rule(app_name, target)
+            
+        return result
 
-    def unblock_app_network(self, rule_id: int) -> bool:
+    def _unblock_app_network(self, rule_id: int) -> bool:
         """Remove blocking rule for application"""
         if self.interceptor.remove_blocking_rule(rule_id):
             # Force cache update
@@ -278,6 +382,20 @@ class NetworkController:
             return True
             
         return False
+    
+    def unblock_app_network(self, rule_id: int) -> bool:
+        """Enhanced unblock method"""
+        # Get rule details before removing
+        blocks = self.get_active_blocks()
+        rule = next((b for b in blocks if b['id'] == rule_id), None)
+        
+        result = self._unblock_app_network(rule_id)
+        
+        # Also remove from proxy
+        if result and rule:
+            self.proxy.remove_blocking_rule(rule_id)
+            
+        return result
 
     def get_active_blocks(self) -> List[Dict]:
         """Get list of active blocking rules"""
@@ -408,6 +526,10 @@ class NetworkController:
     def _cleanup(self):
         """Enhanced cleanup with better error handling"""
         try:
+            # Stop proxy
+            if self.proxy_running:
+                self.stop_proxy()
+
             # First try to cleanup monitor
             if hasattr(self.monitor, '_cleanup'):
                 self.monitor._cleanup()
@@ -475,8 +597,11 @@ def display_menu():
     print("5. Start monitoring")
     print("6. Search applications")
     print("7. View logs")
-    print("8. Exit")
-    return input("\nSelect an option (1-8): ").strip()
+    print("8. Start proxy server")
+    print("9. Stop proxy server")
+    print("10. Exit")
+    return input("\nSelect an option (1-10): ").strip()
+
 def handle_block_app(controller):
     """Handle application blocking menu"""
     print("\nEnter application name (or part of name to search):")
@@ -619,6 +744,16 @@ def main():
             handle_view_logs(controller)
             
         elif choice == "8":
+            if controller.start_proxy():
+                print("\nProxy server started. System proxy configured.")
+                print("You may need to restart your browsers.")
+                
+        elif choice == "9":
+            if controller.stop_proxy():
+                print("\nProxy server stopped. System proxy removed.")
+                print("You may need to restart your browsers.")
+                
+        elif choice == "10":
             print("\nCleaning up and exiting...")
             controller._cleanup()
             break
