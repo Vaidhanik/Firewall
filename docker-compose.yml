@@ -10,10 +10,10 @@ services:
     volumes:
       # - /sys:/sys:ro
       # - /proc:/proc:ro
+      - ./src/proxy.py:/app/proxy.py
       - ./src/system.py:/app/system.py
       - ./src/server.py:/app/server.py
       - ./src/monitor.py:/app/monitor.py
-      - ./src/proxy.py:/app/proxy.py
       - ./src/interceptor.py:/app/interceptor.py
       - ./src/requirements.txt:/app/requirements.txt
       - ./src/network_control.py:/app/network_control.py
