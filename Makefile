@@ -7,7 +7,7 @@ run-tracer:
 run-panel:
 	sudo rm -rf test/logs
 	sudo rm -rf logs
-	sudo $(FIREWALL_DIR)/test/.firewall/bin/python3 ./test/network_control.py
+	sudo $(FIREWALL_DIR)/test/.firewall/bin/python3 ./src/network_control.py
 
 test-firewall:
 	$(FIREWALL_DIR)/test/.firewall/bin/python3 ./test/tester.py
@@ -37,10 +37,27 @@ server-apps:
 server-rules:
 	curl http://localhost:5000/rules
 
+# server-block:
+# 	curl -X POST http://localhost:5000/block \
+#   -H "Content-Type: application/json" \
+#   -d '{"app":"firefox","target":"x.com"}'
+
 server-block:
-	curl -X POST http://localhost:5000/block \
-  -H "Content-Type: application/json" \
-  -d '{"app":"firefox","target":"yahoo.com"}'
+	@echo "Sending block request..."
+	@curl -X POST \
+		-H "Content-Type: application/json" \
+		-d '{"app":"firefox","target":"x.com"}' \
+		http://localhost:5000/block | jq '.'
+
+verify-block:
+	@echo "Verifying block..."
+	@curl -s http://localhost:5000/rules | jq '.'
+	@echo "\nTesting connection to x.com..."
+	@firefox --headless https://x.com || echo "Connection blocked (expected)"
+
+block-and-verify: server-block verify-block
+
+#====================================================================================#
 
 # Firewall
 
