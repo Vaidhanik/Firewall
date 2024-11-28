@@ -13,14 +13,12 @@ RUN apt-get update && apt-get install -y \
 # Set up the working directory
 WORKDIR /app
 
+RUN mkdir -p /app/logs /app/data && \
+    chmod -R 777 /app/logs /app/data
+
 # Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-RUN mkdir -p /app/logs && chmod 777 /app/logs
-
-COPY access.sh /access.sh
-RUN chmod +x /access.sh
 
 # Copy entrypoint script
 COPY entrypoint.sh /entrypoint.sh
@@ -31,4 +29,4 @@ COPY . .
 EXPOSE 5000
 
 # Set the entrypoint
-# ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/entrypoint.sh"]
