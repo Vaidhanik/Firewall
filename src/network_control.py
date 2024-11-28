@@ -144,83 +144,83 @@ class NetworkController:
         except Exception as e:
             print(f"Warning: Could not remove system proxy: {e}")
 
-    # def start_detached_monitor(self) -> bool:
-    #     """Start monitoring in a separate process"""
-    #     if self.monitor_process and self.monitor_process.is_alive():
-    #         print("\nMonitoring is already running!")
-    #         return False
+    def start_detached_monitor(self) -> bool:
+        """Start monitoring in a separate process"""
+        if self.monitor_process and self.monitor_process.is_alive():
+            print("\nMonitoring is already running!")
+            return False
 
-    #     # Create a new process for monitoring
-    #     self.monitor_running.value = True
-    #     self.monitor_stats['start_time'] = datetime.now().isoformat()
+        # Create a pipe for communication
+        self.monitor_running.value = True
+        self.monitor_stats['start_time'] = datetime.now().isoformat()
         
-    #     self.monitor_process = multiprocessing.Process(
-    #         target=self._run_monitor_process,
-    #         args=(self.monitor_running, self.monitor_stats)
-    #     )
-    #     self.monitor_process.start()
+        # Create and start monitor process
+        self.monitor_process = multiprocessing.Process(
+            target=self._run_monitor_process,
+            args=(self.monitor_running, self.monitor_stats)
+        )
+        self.monitor_process.daemon = True  # Make it daemon
+        self.monitor_process.start()
 
-    #     print(f"\n✓ Monitoring started in background (PID: {self.monitor_process.pid})")
-    #     return True
+        print(f"\n✓ Monitoring started in background (PID: {self.monitor_process.pid})")
+        return True
 
-    # def _run_monitor_process(self, running_flag, stats_dict):
-    #     """Running monitoring in separate process"""
-    #     try:
-    #         # Redirect output to log file
-    #         log_file = self.logs_dir / 'monitor.log'
-    #         with open(log_file, 'a') as f:
-    #             f.write(f"\n=== Monitor started at {datetime.now().isoformat()} ===\n")
 
-    #             while running_flag.value:
-    #                 connections = self.monitor.get_connections()
-    #                 self.update_app_state(connections)
+    def _run_monitor_process(self, running_flag, stats_dict):
+        """Running monitoring in separate process"""
+        try:
+            # Redirect output to log file
+            log_file = self.logs_dir / 'monitor.log'
+            with open(log_file, 'a') as f:
+                f.write(f"\n=== Monitor started at {datetime.now().isoformat()} ===\n")
 
-    #                 for conn in connections:
-    #                     stats_dict['total_connections'] += 1
-    #                     allowed, rule = self.check_connection_allowed(conn)
+                while running_flag.value:
+                    connections = self.monitor.get_connections()
+                    self.update_app_state(connections, quiet=True)
 
-    #                     if not allowed:
-    #                         stats_dict['blocked_attempts'] += 1
+                    for conn in connections:
+                        stats_dict['total_connections'] += 1
+                        allowed, rule = self.check_connection_allowed(conn)
+
+                        if not allowed:
+                            stats_dict['blocked_attempts'] += 1
                             
-    #                         if conn['program'] in self.app_states:
-    #                             self.app_states[conn['program']]['blocked_attempts'] += 1
+                            if conn['program'] in self.app_states:
+                                self.app_states[conn['program']]['blocked_attempts'] += 1
                             
-    #                         # Log blocked attempt
-    #                         block_info = (
-    #                             f"Blocked: {conn['program']} -> "
-    #                             f"{conn['remote_addr']}:{conn['remote_port']}\n"
-    #                         )
-    #                         f.write(block_info)
-    #                         f.flush()
+                            # Log blocked attempt quietly
+                            f.write(
+                                f"{datetime.now().isoformat()} - Blocked: {conn['program']} -> "
+                                f"{conn['remote_addr']}:{conn['remote_port']}\n"
+                            )
+                            f.flush()
 
-    #                         self.interceptor.log_blocked_attempt(
-    #                             rule['rule_id'],
-    #                             conn['program'],
-    #                             conn['local_addr'],
-    #                             conn['remote_addr'],
-    #                             f"Blocked by {rule['type']} rule targeting {rule['target']}"
-    #                         )
+                            self.interceptor.log_blocked_attempt(
+                                rule['rule_id'],
+                                conn['program'],
+                                conn['local_addr'],
+                                conn['remote_addr'],
+                                f"Blocked by {rule['type']} rule targeting {rule['target']}"
+                            )
 
-    #                         # Ensure firewall rule is active
-    #                         self.interceptor.create_firewall_rule(
-    #                             conn['program'],
-    #                             conn['remote_addr']
-    #                         )
-    #                     else:
-    #                         self.monitor.log_connection(conn)
+                            self.interceptor.enforce_firewall_rule(
+                                conn['program'],
+                                conn['remote_addr']
+                            )
+                        else:
+                            self.monitor.log_connection(conn)
 
-    #                 # Update statistics
-    #                 stats_dict['active_apps'] = len(self.active_apps)
-    #                 stats_dict['active_rules'] = len(self.get_active_blocks())
-                    
-    #                 time.sleep(1)
+                    stats_dict['active_apps'] = len(self.active_apps)
+                    stats_dict['active_rules'] = len(self.get_active_blocks())
+                    time.sleep(1)
 
-    #     except Exception as e:
-    #         with open(self.logs_dir / 'monitor_error.log', 'a') as f:
-    #             f.write(f"\nError in monitor: {e}\n")
-    #     finally:
-    #         self.monitor._cleanup()
-
+        except Exception as e:
+            with open(self.logs_dir / 'monitor_error.log', 'a') as f:
+                f.write(f"\nError in monitor: {e}\n")
+        finally:
+            if hasattr(self.monitor, '_cleanup'):
+                self.monitor._cleanup()
+   
     # def stop_monitor(self) -> bool:
     #     """Stop the detached monitoring process"""
     #     if self.monitor_process and self.monitor_process.is_alive():
@@ -414,14 +414,14 @@ class NetworkController:
         
         return blocks
 
-    def update_app_state(self, connections: List[Dict]) -> None:
+    def update_app_state(self, connections: List[Dict], quiet: bool = False) -> None:
         """Update state of active applications"""
         current_apps = set()
-        
+
         for conn in connections:
             app_name = conn['program']
             current_apps.add(app_name)
-            
+
             if app_name not in self.app_states:
                 self.app_states[app_name] = {
                     'first_seen': datetime.now().isoformat(),
@@ -429,30 +429,31 @@ class NetworkController:
                     'blocked_attempts': 0,
                     'unique_destinations': set()
                 }
-            
+
             self.app_states[app_name]['connections'] += 1
             self.app_states[app_name]['unique_destinations'].add(conn['remote_addr'])
 
         # Check for new and stopped applications
         new_apps = current_apps - self.active_apps
         stopped_apps = self.active_apps - current_apps
-        
-        for app in new_apps:
-            print(f"\n[+] New application detected: {app}")
-            # Log relevant details about new application
-            if app in self.rule_cache:
-                print(f"    └─ Has {len(self.rule_cache[app])} active blocking rules")
-        
-        for app in stopped_apps:
-            print(f"\n[-] Application stopped: {app}")
-            # Log final statistics for stopped application
-            if app in self.app_states:
-                stats = self.app_states[app]
-                print(f"    └─ Total connections: {stats['connections']}")
-                print(f"    └─ Blocked attempts: {stats['blocked_attempts']}")
-                print(f"    └─ Unique destinations: {len(stats['unique_destinations'])}")
-        
+
+        # Only print if not in quiet mode
+        if not quiet:
+            for app in new_apps:
+                print(f"\n[+] New application detected: {app}")
+                if app in self.rule_cache:
+                    print(f"    └─ Has {len(self.rule_cache[app])} active blocking rules")
+
+            for app in stopped_apps:
+                print(f"\n[-] Application stopped: {app}")
+                if app in self.app_states:
+                    stats = self.app_states[app]
+                    print(f"    └─ Total connections: {stats['connections']}")
+                    print(f"    └─ Blocked attempts: {stats['blocked_attempts']}")
+                    print(f"    └─ Unique destinations: {len(stats['unique_destinations'])}")
+
         self.active_apps = current_apps
+
 
     def monitor_with_control(self):
         """Main monitoring loop with integrated blocking"""
@@ -725,9 +726,9 @@ def main():
             
         elif choice == "5":
             print("\nStarting network monitoring...")
-            print("Press Ctrl+C to stop")
-            controller.monitor_with_control()
-            
+            print("Use 'View logs' or 'View current statistics' to check status")
+            controller.start_detached_monitor()            
+
         elif choice == "6":
             print("\nEnter search term:")
             search = input("> ").strip()
