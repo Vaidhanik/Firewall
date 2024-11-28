@@ -21,11 +21,16 @@ services:
     cap_add:
       - NET_ADMIN # Adds the NET_ADMIN capability for networking tasks
       - SYS_ADMIN # Adds SYS_ADMIN for additional networking capabilities
+    environment:
+      - FLASK_APP=server.py
+      - FLASK_ENV=production
+      - PYTHONUNBUFFERED=1
       # - NET_RAW
       # - SYS_PTRACE
     # security_opt:
     #   - apparmor=unconfined
-    command: python server.py
+    # command: python server.py
+    command: /entrypoint.sh
     stdin_open: true # Keeps the stdin open for interactive sessions
     tty: true # Allocates a pseudo-TTY
     restart: unless-stopped
