@@ -104,7 +104,6 @@ class LinuxInterceptor(BaseInterceptor):
             chain_name = f"APP_{process_name.upper()}"
             
             if action == 'add':
-                # self._remove_existing_rules(iptables_cmd, process_name, target_ip) # EXPERIMENTAL
                 try:
                     # Create chain if it doesn't exist
                     subprocess.run(['sudo', iptables_cmd, '-N', chain_name], check=False)
@@ -210,7 +209,6 @@ class LinuxInterceptor(BaseInterceptor):
                     ], check=True)
 
             else:  # Remove rules
-                # self._remove_existing_rules(iptables_cmd, app_path, target_ip)     
                 try:
                     output = subprocess.check_output([
                         'sudo', iptables_cmd, '-L', chain_name, '--line-numbers', '-n'
@@ -254,6 +252,100 @@ class LinuxInterceptor(BaseInterceptor):
         except Exception as e:
             self.logger.error(f"Error managing {iptables_cmd} rules: {e}")
             return False
+        
+    def _remove_firewall_rules(self, app_name: str, target_ip: str) -> bool:
+       """Remove all firewall rules for this app and target"""
+       try:
+           process_name = os.path.basename(app_name)
+           chain_name = f"APP_{process_name.upper()}"
+
+           for cmd in ['iptables', 'ip6tables']:
+               try:
+                   # First check if chain exists
+                   chain_check = subprocess.run(
+                       ['sudo', cmd, '-L', chain_name, '-n'],
+                       capture_output=True
+                   )
+
+                   if chain_check.returncode != 0:
+                       continue
+
+                   # Get chain rules
+                   output = subprocess.check_output([
+                       'sudo', cmd, '-L', chain_name, '--line-numbers', '-n'
+                   ], stderr=subprocess.PIPE).decode()
+
+                   # Remove rules matching our target IP
+                   rule_numbers = []
+                   for line in output.split('\n'):
+                       if target_ip in line:
+                           try:
+                               rule_num = line.split()[0]
+                               rule_numbers.append(int(rule_num))
+                           except (IndexError, ValueError):
+                               continue
+
+                   # Remove matching rules in reverse order
+                   for rule_num in sorted(rule_numbers, reverse=True):
+                       try:
+                           subprocess.run([
+                               'sudo', cmd, '-D', chain_name, str(rule_num)
+                           ], check=True)
+                           self.logger.info(f"Removed rule {rule_num} from {chain_name}")
+                       except subprocess.CalledProcessError:
+                           self.logger.error(f"Failed to remove rule {rule_num}")
+
+                   # Check if chain is completely empty
+                   remaining_output = subprocess.check_output([
+                       'sudo', cmd, '-L', chain_name, '-n'
+                   ], stderr=subprocess.PIPE).decode()
+
+                   # Count actual rules (skip header lines)
+                   remaining_rules = [line for line in remaining_output.split('\n')[2:] if line.strip()]
+
+                   # Log the state
+                   if remaining_rules:
+                       self.logger.info(f"Chain {chain_name} still has {len(remaining_rules)} rules, keeping chain")
+                       # Keep the chain since it has other rules
+                       continue
+
+                   # At this point, chain is empty, get all references to the chain
+                   refs_output = subprocess.check_output([
+                       'sudo', cmd, '-L', 'OUTPUT', '-n'
+                   ], stderr=subprocess.PIPE).decode()
+
+                   chain_referenced = False
+                   for line in refs_output.split('\n'):
+                       if chain_name in line:
+                           chain_referenced = True
+                           break
+
+                   if not chain_referenced:
+                       self.logger.info(f"Chain {chain_name} is unused, removing completely")
+                       # No references and no rules, safe to remove
+                       try:
+                           subprocess.run([
+                               'sudo', cmd, '-F', chain_name  # Flush first
+                           ], check=True)
+                           subprocess.run([
+                               'sudo', cmd, '-X', chain_name  # Then delete
+                           ], check=True)
+                           self._cleanup_app_cgroup(process_name)
+                           self.logger.info(f"Successfully removed chain {chain_name}")
+                       except subprocess.CalledProcessError as e:
+                           self.logger.warning(f"Could not remove chain {chain_name}: {e}")
+                   else:
+                       self.logger.info(f"Chain {chain_name} is still referenced, keeping chain")
+
+               except subprocess.CalledProcessError as e:
+                   self.logger.error(f"Error processing {cmd} rules: {e}")
+                   continue
+
+           return True
+
+       except Exception as e:
+           self.logger.error(f"Error removing firewall rules: {e}")
+           return False
      
     def add_blocking_rule(self, app_name: str, target: str) -> bool:
         """Add new blocking rule"""
@@ -339,12 +431,12 @@ class LinuxInterceptor(BaseInterceptor):
             # Remove firewall rules
             if resolved_ips:
                 for ip in resolved_ips.split(','):
-                    if not self.remove_rule(app_name, ip.strip()):
+                    if not self._remove_firewall_rules(app_name, ip.strip()):
                         success = False
                         
             # Also try target if it's an IP
             if target_type == 'ip':
-                if not self.remove_rule(app_name, target):
+                if not self._remove_firewall_rules(app_name, target):
                     success = False
                     
             # Deactivate in database if successful
@@ -369,41 +461,11 @@ class LinuxInterceptor(BaseInterceptor):
             self.logger.error(f"Error in create_rule: {e}")
             return False
                 
-    def remove_rule(self, app_path: str, target_ip: str) -> bool:
+    def remove_rule(self, rule_id: int) -> bool:
         """Remove firewall rules for application"""
         # This is just a wrapper that calls create_rule with action='remove'
-        return self.create_rule(app_path, target_ip, action='remove')
+        return self.remove_blocking_rule(rule_id)
     
-    # def cleanup_rules(self) -> bool:
-    #     """Clean up all iptables rules"""
-    #     try:
-    #         for cmd in ['iptables', 'ip6tables']:
-    #             try:
-    #                 # Get all APP_ chains
-    #                 output = subprocess.check_output([
-    #                     'sudo', cmd, '-L', '-n'
-    #                 ], stderr=subprocess.PIPE).decode()
-
-    #                 for line in output.split('\n'):
-    #                     if line.startswith('Chain APP_'):
-    #                         chain = line.split()[1]
-    #                         try:
-    #                             # Flush and remove chain
-    #                             subprocess.run(['sudo', cmd, '-F', chain], check=True)
-    #                             subprocess.run(['sudo', cmd, '-D', 'OUTPUT', '-j', chain], check=False)
-    #                             subprocess.run(['sudo', cmd, '-X', chain], check=True)
-    #                         except subprocess.CalledProcessError:
-    #                             continue
-
-    #             except subprocess.CalledProcessError:
-    #                 continue
-
-    #         return True
-            
-    #     except Exception as e:
-    #         self.logger.error(f"Error in cleanup: {e}")
-    #         return False
-
     def cleanup_rules(self) -> bool:
         """Force cleanup of all firewall rules"""
         try:
