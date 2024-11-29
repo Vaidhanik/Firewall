@@ -1,4 +1,6 @@
 import os
+import pwd
+import grp
 import socket
 import sqlite3
 import logging
@@ -7,11 +9,13 @@ import subprocess
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Tuple, List
+from processmanager import ProcessManager
 
 class NetworkInterceptor:
     def __init__(self, db_path: str = "interceptor.db"):
         self.db_path = db_path
         self.os_type = platform.system().lower()
+        self.cgroup_base = Path("/sys/fs/cgroup/net_cls")
         self.setup_database()
         self.setup_logging()
         
@@ -68,7 +72,71 @@ class NetworkInterceptor:
                 )
             ''')
             conn.commit()
+    
+    def _setup_cgroup_for_app(self, app_name: str) -> int:
+        """Setup cgroup for application and return classid"""
+        try:
+            # Ensure net_cls cgroup exists
+            if not self.cgroup_base.exists():
+                subprocess.run(['sudo', 'modprobe', 'cls_cgroup'], check=True)
+                subprocess.run(['sudo', 'mkdir', '-p', str(self.cgroup_base)], check=True)
+                subprocess.run([
+                    'sudo', 'mount', '-t', 'cgroup', '-o', 'net_cls',
+                    'net_cls', str(self.cgroup_base)
+                ], check=False)  # Don't error if already mounted
+            
+            # Create app-specific cgroup
+            app_cgroup = self.cgroup_base / app_name
+            if not app_cgroup.exists():
+                subprocess.run(['sudo', 'mkdir', '-p', str(app_cgroup)], check=True)
+            
+            # Generate unique classid (1:1000-1:65535)
+            classid = abs(hash(app_name)) % 64535 + 1000
+            
+            # Set the classid
+            subprocess.run([
+                'sudo', 'sh', '-c',
+                f'echo {classid} > {str(app_cgroup)}/net_cls.classid'
+            ], check=True)
+            
+            return classid
+            
+        except Exception as e:
+            self.logger.error(f"Failed to setup cgroup: {e}")
+            return None
         
+    def _track_app_processes(self, app_name: str, classid: int) -> bool:
+        """Find and move application processes to cgroup"""
+        try:
+            # Find all processes matching app name
+            ps_output = subprocess.check_output([
+                'pgrep', '-f', app_name
+            ], universal_newlines=True)
+            
+            pids = ps_output.strip().split()
+            
+            if not pids:
+                self.logger.warning(f"No processes found for {app_name}")
+                return False
+            
+            # Move each process to cgroup
+            app_cgroup = self.cgroup_base / app_name
+            for pid in pids:
+                try:
+                    subprocess.run([
+                        'sudo', 'sh', '-c',
+                        f'echo {pid.strip()} > {str(app_cgroup)}/cgroup.procs'
+                    ], check=True)
+                    self.logger.info(f"Moved process {pid} to cgroup")
+                except subprocess.CalledProcessError as e:
+                    self.logger.error(f"Failed to move process {pid}: {e}")
+            
+            return True
+            
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"Failed to track processes: {e}")
+            return False
+
     def _create_linux_rules(self, app_path: str, target_ip: str, ip_version: str, action: str = 'add') -> bool:
         """Create iptables/ip6tables rule for Linux systems"""
         try:
@@ -83,10 +151,18 @@ class NetworkInterceptor:
                 self.logger.error(f"Could not find path for {app_path}")
                 return False
             
+            classid = self._setup_cgroup_for_app(process_name)
+            if not classid:
+                self.logger.error("Failed to setup cgroup")
+                return False
+            
+            if not self._track_app_processes(process_name, classid):
+                self.logger.warning("No processes tracked, rules may not work until app restarts")
+
             # Use appropriate command based on IP version
             iptables_cmd = 'ip6tables' if ip_version == 'ipv6' else 'iptables'
             # icmp_protocol = 'icmpv6' if ip_version == 'ipv6' else 'icmp'
-            
+
             # Create a unique comment for this rule
             comment = f"block_{process_name}_{target_ip}"
             chain_name = f"APP_{process_name.upper()}"
@@ -94,6 +170,7 @@ class NetworkInterceptor:
             if action == 'add':
                 # self._remove_existing_rules(iptables_cmd, process_name, target_ip) # EXPERIMENTAL
                 try:
+                    # Create chain if it doesn't exist
                     subprocess.run(['sudo', iptables_cmd, '-N', chain_name], check=False)
 
                     # Check if jump rule exists
@@ -105,18 +182,19 @@ class NetworkInterceptor:
                     # Add jump rule if it doesn't exist
                     if check_jump.returncode != 0:
                         subprocess.run([
-                            'sudo', iptables_cmd, '-I', 'OUTPUT', '1', '-j', chain_name
+                            'sudo', iptables_cmd, '-I', 'OUTPUT', '1',
+                            '-m', 'owner', '--uid-owner', str(user_id),
+                            '-m', 'cgroup', '--cgroup', str(classid),  # Add cgroup match
+                            '-j', chain_name
                         ], check=True)
 
                     rules_to_add = []
-                
-                    # Define rules based on IP version
                     if ip_version == 'ipv6':
                         rules_to_add = [
                             # Block TCP for IPv6
                             [
                                 'sudo', 'ip6tables',
-                                '-A', 'OUTPUT',
+                                '-A', chain_name,
                                 '-p', 'tcp',
                                 '-d', target_ip,
                                 '-m', 'owner', '--uid-owner', str(user_id),
@@ -127,7 +205,7 @@ class NetworkInterceptor:
                             # Block UDP for IPv6
                             [
                                 'sudo', 'ip6tables',
-                                '-A', 'OUTPUT',
+                                '-A', chain_name,
                                 '-p', 'udp',
                                 '-d', target_ip,
                                 '-m', 'owner', '--uid-owner', str(user_id),
@@ -137,7 +215,7 @@ class NetworkInterceptor:
                             # Block ICMPv6
                             [
                                 'sudo', 'ip6tables',
-                                '-A', 'OUTPUT',
+                                '-A', chain_name,
                                 '-p', 'icmpv6',
                                 '-d', target_ip,
                                 '-m', 'owner', '--uid-owner', str(user_id),
@@ -150,7 +228,7 @@ class NetworkInterceptor:
                             # Block TCP for IPv4
                             [
                                 'sudo', 'iptables',
-                                '-A', 'OUTPUT',
+                                '-A', chain_name,
                                 '-p', 'tcp',
                                 '-d', target_ip,
                                 '-m', 'owner', '--uid-owner', str(user_id),
@@ -161,7 +239,7 @@ class NetworkInterceptor:
                             # Block UDP for IPv4
                             [
                                 'sudo', 'iptables',
-                                '-A', 'OUTPUT',
+                                '-A', chain_name,
                                 '-p', 'udp',
                                 '-d', target_ip,
                                 '-m', 'owner', '--uid-owner', str(user_id),
@@ -171,7 +249,7 @@ class NetworkInterceptor:
                             # Block ICMP for IPv4
                             [
                                 'sudo', 'iptables',
-                                '-A', 'OUTPUT',
+                                '-A', chain_name,
                                 '-p', 'icmp',
                                 '-d', target_ip,
                                 '-m', 'owner', '--uid-owner', str(user_id),
@@ -180,17 +258,6 @@ class NetworkInterceptor:
                             ]
                         ]
 
-                    # # Add each rule
-                    # for rule_cmd in rules_to_add:
-                    #     try:
-                    #         subprocess.run(rule_cmd, check=True)
-                    #     except subprocess.CalledProcessError as e:
-                    #         self.logger.error(f"Failed to add {iptables_cmd} rule: {e}")
-                    #         return False
-                        
-                    # self.logger.info(f"Creating chain {chain_name} for {process_name}")
-                    # self.logger.info(f"Rules to add: {rules_to_add}")
-                    # Add each rule
                     for rule_cmd in rules_to_add:
                         subprocess.run(rule_cmd, check=True)
 
@@ -231,7 +298,9 @@ class NetworkInterceptor:
                     remaining_rules = subprocess.check_output([
                         'sudo', iptables_cmd, '-L', chain_name, '-n'
                     ]).decode()
-                    if 'Chain APP_' in remaining_rules and 'target' in remaining_rules:
+
+                    # if 'Chain APP_' in remaining_rules and 'target' in remaining_rules:
+                    if 'Chain APP_' in remaining_rules and not any(line.strip() for line in remaining_rules.split('\n')[2:]):
                         # Remove jump rule and chain
                         subprocess.run([
                             'sudo', iptables_cmd, '-D', 'OUTPUT', '-j', chain_name
@@ -239,13 +308,13 @@ class NetworkInterceptor:
                         subprocess.run([
                             'sudo', iptables_cmd, '-X', chain_name
                         ], check=False)
-
+        
                 except subprocess.CalledProcessError:
                     self.logger.error(f"Failed to remove rules: {e}")
                     return False
 
             return True
-            
+        
         except Exception as e:
             self.logger.error(f"Error managing {iptables_cmd} rules: {e}")
             return False
@@ -557,63 +626,188 @@ class NetworkInterceptor:
             self.logger.error(f"Database error: {e}")
             return False
     
-    def _remove_firewall_rules(self, app_name: str, target_ip: str) -> bool:
-        """Remove all firewall rules for this app and target"""
+    # def _remove_firewall_rules(self, app_name: str, target_ip: str) -> bool:
+    #     """Remove all firewall rules for this app and target"""
+    #     try:
+    #         # Generate comment pattern for matching
+    #         comment = f"block_{app_name}_{target_ip}"
+
+    #         # List and remove IPv4 rules
+    #         output = subprocess.check_output(
+    #             ['sudo', 'iptables', '-L', 'OUTPUT', '--line-numbers', '-n'],
+    #             stderr=subprocess.PIPE
+    #         ).decode()
+
+    #         # Find and remove rules in reverse order
+    #         rule_numbers = []
+    #         for line in output.split('\n'):
+    #             if comment in line:
+    #                 try:
+    #                     rule_num = line.split()[0]
+    #                     rule_numbers.append(int(rule_num))
+    #                 except (IndexError, ValueError):
+    #                     continue
+
+    #         for rule_num in sorted(rule_numbers, reverse=True):
+    #             subprocess.run(
+    #                 ['sudo', 'iptables', '-D', 'OUTPUT', str(rule_num)],
+    #                 check=True
+    #             )
+
+    #         # Also check and remove IPv6 rules if present
+    #         try:
+    #             output = subprocess.check_output(
+    #                 ['sudo', 'ip6tables', '-L', 'OUTPUT', '--line-numbers', '-n'],
+    #                 stderr=subprocess.PIPE
+    #             ).decode()
+
+    #             rule_numbers = []
+    #             for line in output.split('\n'):
+    #                 if comment in line:
+    #                     try:
+    #                         rule_num = line.split()[0]
+    #                         rule_numbers.append(int(rule_num))
+    #                     except (IndexError, ValueError):
+    #                         continue
+
+    #             for rule_num in sorted(rule_numbers, reverse=True):
+    #                 subprocess.run(
+    #                     ['sudo', 'ip6tables', '-D', 'OUTPUT', str(rule_num)],
+    #                     check=True
+    #                 )
+    #         except subprocess.CalledProcessError:
+    #             pass  # Ignore IPv6 errors
+
+    #         return True
+    #     except Exception as e:
+    #         self.logger.error(f"Error removing firewall rules: {e}")
+    #         return False
+    
+    def _cleanup_app_cgroup(self, process_name: str):
+        """Clean up cgroup for an application"""
         try:
-            # Generate comment pattern for matching
-            comment = f"block_{app_name}_{target_ip}"
+            app_cgroup = self.cgroup_base / process_name
 
-            # List and remove IPv4 rules
-            output = subprocess.check_output(
-                ['sudo', 'iptables', '-L', 'OUTPUT', '--line-numbers', '-n'],
-                stderr=subprocess.PIPE
-            ).decode()
+            # First move all processes out of cgroup
+            if app_cgroup.exists():
+                try:
+                    # Move processes back to root cgroup
+                    procs_file = app_cgroup / "cgroup.procs"
+                    if procs_file.exists():
+                        with open(procs_file, 'r') as f:
+                            pids = f.readlines()
+                            for pid in pids:
+                                try:
+                                    subprocess.run([
+                                        'sudo', 'sh', '-c',
+                                        f'echo {pid.strip()} > {self.cgroup_base}/cgroup.procs'
+                                    ], check=True)
+                                except:
+                                    pass
 
-            # Find and remove rules in reverse order
-            rule_numbers = []
-            for line in output.split('\n'):
-                if comment in line:
-                    try:
-                        rule_num = line.split()[0]
-                        rule_numbers.append(int(rule_num))
-                    except (IndexError, ValueError):
-                        continue
+                    # Remove the cgroup directory
+                    subprocess.run(['sudo', 'rmdir', str(app_cgroup)], check=True)
 
-            for rule_num in sorted(rule_numbers, reverse=True):
-                subprocess.run(
-                    ['sudo', 'iptables', '-D', 'OUTPUT', str(rule_num)],
-                    check=True
-                )
+                except Exception as e:
+                    self.logger.error(f"Error cleaning cgroup: {e}")
 
-            # Also check and remove IPv6 rules if present
-            try:
-                output = subprocess.check_output(
-                    ['sudo', 'ip6tables', '-L', 'OUTPUT', '--line-numbers', '-n'],
-                    stderr=subprocess.PIPE
-                ).decode()
-
-                rule_numbers = []
-                for line in output.split('\n'):
-                    if comment in line:
-                        try:
-                            rule_num = line.split()[0]
-                            rule_numbers.append(int(rule_num))
-                        except (IndexError, ValueError):
-                            continue
-
-                for rule_num in sorted(rule_numbers, reverse=True):
-                    subprocess.run(
-                        ['sudo', 'ip6tables', '-D', 'OUTPUT', str(rule_num)],
-                        check=True
-                    )
-            except subprocess.CalledProcessError:
-                pass  # Ignore IPv6 errors
-
-            return True
         except Exception as e:
-            self.logger.error(f"Error removing firewall rules: {e}")
-            return False
+            self.logger.error(f"Failed to cleanup cgroup: {e}")
 
+    def _remove_firewall_rules(self, app_name: str, target_ip: str) -> bool:
+       """Remove all firewall rules for this app and target"""
+       try:
+           process_name = os.path.basename(app_name)
+           chain_name = f"APP_{process_name.upper()}"
+
+           for cmd in ['iptables', 'ip6tables']:
+               try:
+                   # First check if chain exists
+                   chain_check = subprocess.run(
+                       ['sudo', cmd, '-L', chain_name, '-n'],
+                       capture_output=True
+                   )
+
+                   if chain_check.returncode != 0:
+                       continue
+
+                   # Get chain rules
+                   output = subprocess.check_output([
+                       'sudo', cmd, '-L', chain_name, '--line-numbers', '-n'
+                   ], stderr=subprocess.PIPE).decode()
+
+                   # Remove rules matching our target IP
+                   rule_numbers = []
+                   for line in output.split('\n'):
+                       if target_ip in line:
+                           try:
+                               rule_num = line.split()[0]
+                               rule_numbers.append(int(rule_num))
+                           except (IndexError, ValueError):
+                               continue
+
+                   # Remove matching rules in reverse order
+                   for rule_num in sorted(rule_numbers, reverse=True):
+                       try:
+                           subprocess.run([
+                               'sudo', cmd, '-D', chain_name, str(rule_num)
+                           ], check=True)
+                           self.logger.info(f"Removed rule {rule_num} from {chain_name}")
+                       except subprocess.CalledProcessError:
+                           self.logger.error(f"Failed to remove rule {rule_num}")
+
+                   # Check if chain is completely empty
+                   remaining_output = subprocess.check_output([
+                       'sudo', cmd, '-L', chain_name, '-n'
+                   ], stderr=subprocess.PIPE).decode()
+
+                   # Count actual rules (skip header lines)
+                   remaining_rules = [line for line in remaining_output.split('\n')[2:] if line.strip()]
+
+                   # Log the state
+                   if remaining_rules:
+                       self.logger.info(f"Chain {chain_name} still has {len(remaining_rules)} rules, keeping chain")
+                       # Keep the chain since it has other rules
+                       continue
+
+                   # At this point, chain is empty, get all references to the chain
+                   refs_output = subprocess.check_output([
+                       'sudo', cmd, '-L', 'OUTPUT', '-n'
+                   ], stderr=subprocess.PIPE).decode()
+
+                   chain_referenced = False
+                   for line in refs_output.split('\n'):
+                       if chain_name in line:
+                           chain_referenced = True
+                           break
+
+                   if not chain_referenced:
+                       self.logger.info(f"Chain {chain_name} is unused, removing completely")
+                       # No references and no rules, safe to remove
+                       try:
+                           subprocess.run([
+                               'sudo', cmd, '-F', chain_name  # Flush first
+                           ], check=True)
+                           subprocess.run([
+                               'sudo', cmd, '-X', chain_name  # Then delete
+                           ], check=True)
+                           self._cleanup_app_cgroup(process_name)
+                           self.logger.info(f"Successfully removed chain {chain_name}")
+                       except subprocess.CalledProcessError as e:
+                           self.logger.warning(f"Could not remove chain {chain_name}: {e}")
+                   else:
+                       self.logger.info(f"Chain {chain_name} is still referenced, keeping chain")
+
+               except subprocess.CalledProcessError as e:
+                   self.logger.error(f"Error processing {cmd} rules: {e}")
+                   continue
+
+           return True
+
+       except Exception as e:
+           self.logger.error(f"Error removing firewall rules: {e}")
+           return False
+         
     def remove_blocking_rule(self, rule_id: int) -> bool:
         """Remove blocking rule and cleanup firewall rules"""
         try:
@@ -632,24 +826,28 @@ class NetworkInterceptor:
 
                 app_name, target, target_type, resolved_ips = rule
 
-                # Remove firewall rules for all resolved IPs
+                success = True
+                # Remove firewall rules
                 if resolved_ips:
                     for ip in resolved_ips.split(','):
-                        self._remove_firewall_rules(app_name, ip.strip())
+                        if not self._remove_firewall_rules(app_name, ip.strip()):
+                            success = False
 
-                # Also try removing rules for the target if it's an IP
+                # Also try target if it's an IP
                 if target_type == 'ip':
-                    self._remove_firewall_rules(app_name, target)
+                    if not self._remove_firewall_rules(app_name, target):
+                        success = False
 
-                # Then deactivate the rule
-                cursor.execute('''
-                    UPDATE blocking_rules 
-                    SET active = 0 
-                    WHERE id = ?
-                ''', (rule_id,))
-                conn.commit()
+                # Deactivate the rule in database
+                if success:
+                    cursor.execute('''
+                        UPDATE blocking_rules 
+                        SET active = 0 
+                        WHERE id = ?
+                    ''', (rule_id,))
+                    conn.commit()
 
-                return True
+                return success
 
         except sqlite3.Error as e:
             self.logger.error(f"Database error: {e}")
