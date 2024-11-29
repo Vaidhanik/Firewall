@@ -6,7 +6,7 @@ import logging
 import asyncio
 import threading
 from pathlib import Path
-from mitmproxy import ctx, http
+from mitmproxy import http
 from mitmproxy.tools import dump
 from mitmproxy.script import concurrent
 from mitmproxy.options import Options

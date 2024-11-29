@@ -1,12 +1,9 @@
 import os
-import json
-import subprocess
 import logging
 import traceback
-from typing import Dict, Any
+import subprocess
 from flask import Flask, request, jsonify
 from network_control import NetworkController
-from pathlib import Path
 
 logging.basicConfig(
     level=logging.DEBUG,
