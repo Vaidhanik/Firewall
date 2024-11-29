@@ -702,7 +702,7 @@ class NetworkInterceptor:
                 cursor = conn.cursor()
                 cursor.execute('''
                     SELECT app_name, target, target_type, resolved_ips 
-                    FROM blocking_rules 
+                    FROM blocking_rules
                     WHERE id = ? AND active = 1
                 ''', (rule_id,))
 

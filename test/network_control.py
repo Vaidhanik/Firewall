@@ -268,10 +268,10 @@ class NetworkController:
                         print(f"  └─ {details}")
                         
                         # Ensure firewall rule is active
-                        self.interceptor.enforce_firewall_rule(
-                            conn['program'],
-                            conn['remote_addr']
-                        )
+                        # self.interceptor.enforce_firewall_rule(
+                        #     conn['program'],
+                        #     conn['remote_addr']
+                        # )
                     else:
                         # Log allowed connection with process info
                         self.monitor.log_connection(conn)
@@ -324,15 +324,6 @@ class NetworkController:
             
             # Cleanup interceptor rules if needed
             if hasattr(self, 'interceptor'):
-                # @dev >>>>>> DONT REMOVE THIS SEC.
-                # active_blocks = self.get_active_blocks()
-                # if active_blocks:
-                #     print("\nCleaning up firewall rules...")
-                #     for block in active_blocks:
-                #         try:
-                #             self.unblock_app_network(block['id'])
-                #         except:
-                #             print(f"Failed to remove rule for {block['app']} -> {block['target']}")
                 self.interceptor.force_cleanup_rules()
                             
         except Exception as e:
