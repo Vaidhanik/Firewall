@@ -626,63 +626,188 @@ class NetworkInterceptor:
             self.logger.error(f"Database error: {e}")
             return False
     
-    def _remove_firewall_rules(self, app_name: str, target_ip: str) -> bool:
-        """Remove all firewall rules for this app and target"""
+    # def _remove_firewall_rules(self, app_name: str, target_ip: str) -> bool:
+    #     """Remove all firewall rules for this app and target"""
+    #     try:
+    #         # Generate comment pattern for matching
+    #         comment = f"block_{app_name}_{target_ip}"
+
+    #         # List and remove IPv4 rules
+    #         output = subprocess.check_output(
+    #             ['sudo', 'iptables', '-L', 'OUTPUT', '--line-numbers', '-n'],
+    #             stderr=subprocess.PIPE
+    #         ).decode()
+
+    #         # Find and remove rules in reverse order
+    #         rule_numbers = []
+    #         for line in output.split('\n'):
+    #             if comment in line:
+    #                 try:
+    #                     rule_num = line.split()[0]
+    #                     rule_numbers.append(int(rule_num))
+    #                 except (IndexError, ValueError):
+    #                     continue
+
+    #         for rule_num in sorted(rule_numbers, reverse=True):
+    #             subprocess.run(
+    #                 ['sudo', 'iptables', '-D', 'OUTPUT', str(rule_num)],
+    #                 check=True
+    #             )
+
+    #         # Also check and remove IPv6 rules if present
+    #         try:
+    #             output = subprocess.check_output(
+    #                 ['sudo', 'ip6tables', '-L', 'OUTPUT', '--line-numbers', '-n'],
+    #                 stderr=subprocess.PIPE
+    #             ).decode()
+
+    #             rule_numbers = []
+    #             for line in output.split('\n'):
+    #                 if comment in line:
+    #                     try:
+    #                         rule_num = line.split()[0]
+    #                         rule_numbers.append(int(rule_num))
+    #                     except (IndexError, ValueError):
+    #                         continue
+
+    #             for rule_num in sorted(rule_numbers, reverse=True):
+    #                 subprocess.run(
+    #                     ['sudo', 'ip6tables', '-D', 'OUTPUT', str(rule_num)],
+    #                     check=True
+    #                 )
+    #         except subprocess.CalledProcessError:
+    #             pass  # Ignore IPv6 errors
+
+    #         return True
+    #     except Exception as e:
+    #         self.logger.error(f"Error removing firewall rules: {e}")
+    #         return False
+    
+    def _cleanup_app_cgroup(self, process_name: str):
+        """Clean up cgroup for an application"""
         try:
-            # Generate comment pattern for matching
-            comment = f"block_{app_name}_{target_ip}"
+            app_cgroup = self.cgroup_base / process_name
 
-            # List and remove IPv4 rules
-            output = subprocess.check_output(
-                ['sudo', 'iptables', '-L', 'OUTPUT', '--line-numbers', '-n'],
-                stderr=subprocess.PIPE
-            ).decode()
+            # First move all processes out of cgroup
+            if app_cgroup.exists():
+                try:
+                    # Move processes back to root cgroup
+                    procs_file = app_cgroup / "cgroup.procs"
+                    if procs_file.exists():
+                        with open(procs_file, 'r') as f:
+                            pids = f.readlines()
+                            for pid in pids:
+                                try:
+                                    subprocess.run([
+                                        'sudo', 'sh', '-c',
+                                        f'echo {pid.strip()} > {self.cgroup_base}/cgroup.procs'
+                                    ], check=True)
+                                except:
+                                    pass
 
-            # Find and remove rules in reverse order
-            rule_numbers = []
-            for line in output.split('\n'):
-                if comment in line:
-                    try:
-                        rule_num = line.split()[0]
-                        rule_numbers.append(int(rule_num))
-                    except (IndexError, ValueError):
-                        continue
+                    # Remove the cgroup directory
+                    subprocess.run(['sudo', 'rmdir', str(app_cgroup)], check=True)
 
-            for rule_num in sorted(rule_numbers, reverse=True):
-                subprocess.run(
-                    ['sudo', 'iptables', '-D', 'OUTPUT', str(rule_num)],
-                    check=True
-                )
+                except Exception as e:
+                    self.logger.error(f"Error cleaning cgroup: {e}")
 
-            # Also check and remove IPv6 rules if present
-            try:
-                output = subprocess.check_output(
-                    ['sudo', 'ip6tables', '-L', 'OUTPUT', '--line-numbers', '-n'],
-                    stderr=subprocess.PIPE
-                ).decode()
-
-                rule_numbers = []
-                for line in output.split('\n'):
-                    if comment in line:
-                        try:
-                            rule_num = line.split()[0]
-                            rule_numbers.append(int(rule_num))
-                        except (IndexError, ValueError):
-                            continue
-
-                for rule_num in sorted(rule_numbers, reverse=True):
-                    subprocess.run(
-                        ['sudo', 'ip6tables', '-D', 'OUTPUT', str(rule_num)],
-                        check=True
-                    )
-            except subprocess.CalledProcessError:
-                pass  # Ignore IPv6 errors
-
-            return True
         except Exception as e:
-            self.logger.error(f"Error removing firewall rules: {e}")
-            return False
+            self.logger.error(f"Failed to cleanup cgroup: {e}")
 
+    def _remove_firewall_rules(self, app_name: str, target_ip: str) -> bool:
+       """Remove all firewall rules for this app and target"""
+       try:
+           process_name = os.path.basename(app_name)
+           chain_name = f"APP_{process_name.upper()}"
+
+           for cmd in ['iptables', 'ip6tables']:
+               try:
+                   # First check if chain exists
+                   chain_check = subprocess.run(
+                       ['sudo', cmd, '-L', chain_name, '-n'],
+                       capture_output=True
+                   )
+
+                   if chain_check.returncode != 0:
+                       continue
+
+                   # Get chain rules
+                   output = subprocess.check_output([
+                       'sudo', cmd, '-L', chain_name, '--line-numbers', '-n'
+                   ], stderr=subprocess.PIPE).decode()
+
+                   # Remove rules matching our target IP
+                   rule_numbers = []
+                   for line in output.split('\n'):
+                       if target_ip in line:
+                           try:
+                               rule_num = line.split()[0]
+                               rule_numbers.append(int(rule_num))
+                           except (IndexError, ValueError):
+                               continue
+
+                   # Remove matching rules in reverse order
+                   for rule_num in sorted(rule_numbers, reverse=True):
+                       try:
+                           subprocess.run([
+                               'sudo', cmd, '-D', chain_name, str(rule_num)
+                           ], check=True)
+                           self.logger.info(f"Removed rule {rule_num} from {chain_name}")
+                       except subprocess.CalledProcessError:
+                           self.logger.error(f"Failed to remove rule {rule_num}")
+
+                   # Check if chain is completely empty
+                   remaining_output = subprocess.check_output([
+                       'sudo', cmd, '-L', chain_name, '-n'
+                   ], stderr=subprocess.PIPE).decode()
+
+                   # Count actual rules (skip header lines)
+                   remaining_rules = [line for line in remaining_output.split('\n')[2:] if line.strip()]
+
+                   # Log the state
+                   if remaining_rules:
+                       self.logger.info(f"Chain {chain_name} still has {len(remaining_rules)} rules, keeping chain")
+                       # Keep the chain since it has other rules
+                       continue
+
+                   # At this point, chain is empty, get all references to the chain
+                   refs_output = subprocess.check_output([
+                       'sudo', cmd, '-L', 'OUTPUT', '-n'
+                   ], stderr=subprocess.PIPE).decode()
+
+                   chain_referenced = False
+                   for line in refs_output.split('\n'):
+                       if chain_name in line:
+                           chain_referenced = True
+                           break
+
+                   if not chain_referenced:
+                       self.logger.info(f"Chain {chain_name} is unused, removing completely")
+                       # No references and no rules, safe to remove
+                       try:
+                           subprocess.run([
+                               'sudo', cmd, '-F', chain_name  # Flush first
+                           ], check=True)
+                           subprocess.run([
+                               'sudo', cmd, '-X', chain_name  # Then delete
+                           ], check=True)
+                           self._cleanup_app_cgroup(process_name)
+                           self.logger.info(f"Successfully removed chain {chain_name}")
+                       except subprocess.CalledProcessError as e:
+                           self.logger.warning(f"Could not remove chain {chain_name}: {e}")
+                   else:
+                       self.logger.info(f"Chain {chain_name} is still referenced, keeping chain")
+
+               except subprocess.CalledProcessError as e:
+                   self.logger.error(f"Error processing {cmd} rules: {e}")
+                   continue
+
+           return True
+
+       except Exception as e:
+           self.logger.error(f"Error removing firewall rules: {e}")
+           return False
+         
     def remove_blocking_rule(self, rule_id: int) -> bool:
         """Remove blocking rule and cleanup firewall rules"""
         try:
@@ -701,24 +826,28 @@ class NetworkInterceptor:
 
                 app_name, target, target_type, resolved_ips = rule
 
-                # Remove firewall rules for all resolved IPs
+                success = True
+                # Remove firewall rules
                 if resolved_ips:
                     for ip in resolved_ips.split(','):
-                        self._remove_firewall_rules(app_name, ip.strip())
+                        if not self._remove_firewall_rules(app_name, ip.strip()):
+                            success = False
 
-                # Also try removing rules for the target if it's an IP
+                # Also try target if it's an IP
                 if target_type == 'ip':
-                    self._remove_firewall_rules(app_name, target)
+                    if not self._remove_firewall_rules(app_name, target):
+                        success = False
 
-                # Then deactivate the rule
-                cursor.execute('''
-                    UPDATE blocking_rules 
-                    SET active = 0 
-                    WHERE id = ?
-                ''', (rule_id,))
-                conn.commit()
+                # Deactivate the rule in database
+                if success:
+                    cursor.execute('''
+                        UPDATE blocking_rules 
+                        SET active = 0 
+                        WHERE id = ?
+                    ''', (rule_id,))
+                    conn.commit()
 
-                return True
+                return success
 
         except sqlite3.Error as e:
             self.logger.error(f"Database error: {e}")
