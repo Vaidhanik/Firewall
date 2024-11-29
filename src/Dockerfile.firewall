@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y \
     sudo \
     procps \
     iptables \
+    cgroup-tools \
     && rm -rf /var/lib/apt/lists/*
 
 # Set up the working directory
