@@ -85,99 +85,165 @@ class NetworkInterceptor:
             
             # Use appropriate command based on IP version
             iptables_cmd = 'ip6tables' if ip_version == 'ipv6' else 'iptables'
-            icmp_protocol = 'icmpv6' if ip_version == 'ipv6' else 'icmp'
+            # icmp_protocol = 'icmpv6' if ip_version == 'ipv6' else 'icmp'
             
             # Create a unique comment for this rule
             comment = f"block_{process_name}_{target_ip}"
+            chain_name = f"APP_{process_name.upper()}"
             
             if action == 'add':
-                self._remove_existing_rules(iptables_cmd, process_name, target_ip)
+                # self._remove_existing_rules(iptables_cmd, process_name, target_ip) # EXPERIMENTAL
+                try:
+                    subprocess.run(['sudo', iptables_cmd, '-N', chain_name], check=False)
 
-                rules_to_add = []
-                
-                # Define rules based on IP version
-                if ip_version == 'ipv6':
-                    rules_to_add = [
-                        # Block TCP for IPv6
-                        [
-                            'sudo', 'ip6tables',
-                            '-A', 'OUTPUT',
-                            '-p', 'tcp',
-                            '-d', target_ip,
-                            '-m', 'owner', '--uid-owner', str(user_id),
-                            '-m', 'conntrack', '--ctstate', 'NEW,ESTABLISHED',
-                            '-m', 'comment', '--comment', comment,
-                            '-j', 'DROP'
-                        ],
-                        # Block UDP for IPv6
-                        [
-                            'sudo', 'ip6tables',
-                            '-A', 'OUTPUT',
-                            '-p', 'udp',
-                            '-d', target_ip,
-                            '-m', 'owner', '--uid-owner', str(user_id),
-                            '-m', 'comment', '--comment', comment,
-                            '-j', 'DROP'
-                        ],
-                        # Block ICMPv6
-                        [
-                            'sudo', 'ip6tables',
-                            '-A', 'OUTPUT',
-                            '-p', 'icmpv6',
-                            '-d', target_ip,
-                            '-m', 'owner', '--uid-owner', str(user_id),
-                            '-m', 'comment', '--comment', comment,
-                            '-j', 'DROP'
-                        ]
-                    ]
-                else:
-                    rules_to_add = [
-                        # Block TCP for IPv4
-                        [
-                            'sudo', 'iptables',
-                            '-A', 'OUTPUT',
-                            '-p', 'tcp',
-                            '-d', target_ip,
-                            '-m', 'owner', '--uid-owner', str(user_id),
-                            '-m', 'state', '--state', 'NEW,ESTABLISHED',
-                            '-m', 'comment', '--comment', comment,
-                            '-j', 'DROP'
-                        ],
-                        # Block UDP for IPv4
-                        [
-                            'sudo', 'iptables',
-                            '-A', 'OUTPUT',
-                            '-p', 'udp',
-                            '-d', target_ip,
-                            '-m', 'owner', '--uid-owner', str(user_id),
-                            '-m', 'comment', '--comment', comment,
-                            '-j', 'DROP'
-                        ],
-                        # Block ICMP for IPv4
-                        [
-                            'sudo', 'iptables',
-                            '-A', 'OUTPUT',
-                            '-p', 'icmp',
-                            '-d', target_ip,
-                            '-m', 'owner', '--uid-owner', str(user_id),
-                            '-m', 'comment', '--comment', comment,
-                            '-j', 'DROP'
-                        ]
-                    ]
+                    # Check if jump rule exists
+                    check_jump = subprocess.run(
+                        ['sudo', iptables_cmd, '-C', 'OUTPUT', '-j', chain_name],
+                        capture_output=True
+                    )
 
+                    # Add jump rule if it doesn't exist
+                    if check_jump.returncode != 0:
+                        subprocess.run([
+                            'sudo', iptables_cmd, '-I', 'OUTPUT', '1', '-j', chain_name
+                        ], check=True)
+
+                    rules_to_add = []
                 
-                # Add each rule
-                for rule_cmd in rules_to_add:
-                    try:
-                        subprocess.run(rule_cmd, check=True)
-                    except subprocess.CalledProcessError as e:
-                        self.logger.error(f"Failed to add {iptables_cmd} rule: {e}")
-                        return False
+                    # Define rules based on IP version
+                    if ip_version == 'ipv6':
+                        rules_to_add = [
+                            # Block TCP for IPv6
+                            [
+                                'sudo', 'ip6tables',
+                                '-A', 'OUTPUT',
+                                '-p', 'tcp',
+                                '-d', target_ip,
+                                '-m', 'owner', '--uid-owner', str(user_id),
+                                '-m', 'conntrack', '--ctstate', 'NEW,ESTABLISHED',
+                                '-m', 'comment', '--comment', comment,
+                                '-j', 'DROP'
+                            ],
+                            # Block UDP for IPv6
+                            [
+                                'sudo', 'ip6tables',
+                                '-A', 'OUTPUT',
+                                '-p', 'udp',
+                                '-d', target_ip,
+                                '-m', 'owner', '--uid-owner', str(user_id),
+                                '-m', 'comment', '--comment', comment,
+                                '-j', 'DROP'
+                            ],
+                            # Block ICMPv6
+                            [
+                                'sudo', 'ip6tables',
+                                '-A', 'OUTPUT',
+                                '-p', 'icmpv6',
+                                '-d', target_ip,
+                                '-m', 'owner', '--uid-owner', str(user_id),
+                                '-m', 'comment', '--comment', comment,
+                                '-j', 'DROP'
+                            ]
+                        ]
+                    else:
+                        rules_to_add = [
+                            # Block TCP for IPv4
+                            [
+                                'sudo', 'iptables',
+                                '-A', 'OUTPUT',
+                                '-p', 'tcp',
+                                '-d', target_ip,
+                                '-m', 'owner', '--uid-owner', str(user_id),
+                                '-m', 'state', '--state', 'NEW,ESTABLISHED',
+                                '-m', 'comment', '--comment', comment,
+                                '-j', 'DROP'
+                            ],
+                            # Block UDP for IPv4
+                            [
+                                'sudo', 'iptables',
+                                '-A', 'OUTPUT',
+                                '-p', 'udp',
+                                '-d', target_ip,
+                                '-m', 'owner', '--uid-owner', str(user_id),
+                                '-m', 'comment', '--comment', comment,
+                                '-j', 'DROP'
+                            ],
+                            # Block ICMP for IPv4
+                            [
+                                'sudo', 'iptables',
+                                '-A', 'OUTPUT',
+                                '-p', 'icmp',
+                                '-d', target_ip,
+                                '-m', 'owner', '--uid-owner', str(user_id),
+                                '-m', 'comment', '--comment', comment,
+                                '-j', 'DROP'
+                            ]
+                        ]
+
+                    # # Add each rule
+                    # for rule_cmd in rules_to_add:
+                    #     try:
+                    #         subprocess.run(rule_cmd, check=True)
+                    #     except subprocess.CalledProcessError as e:
+                    #         self.logger.error(f"Failed to add {iptables_cmd} rule: {e}")
+                    #         return False
                         
-            else:  # Remove rules
-                self._remove_existing_rules(iptables_cmd, app_path, target_ip)     
+                    # self.logger.info(f"Creating chain {chain_name} for {process_name}")
+                    # self.logger.info(f"Rules to add: {rules_to_add}")
+                    # Add each rule
+                    for rule_cmd in rules_to_add:
+                        subprocess.run(rule_cmd, check=True)
 
-            self.logger.info(f"{'Added' if action == 'add' else 'Removed'} {iptables_cmd} rules for {app_path} -> {target_ip}")
+                    # Log the current state of the chain
+                    self.logger.info(f"Rules in {chain_name}:")
+                    rules = subprocess.check_output(
+                        ['sudo', iptables_cmd, '-L', chain_name, '-n', '-v']
+                    ).decode()
+                    self.logger.info(rules)
+
+                except subprocess.CalledProcessError:
+                    subprocess.run([
+                        'sudo', iptables_cmd, '-A', 'OUTPUT', '-j', chain_name
+                    ], check=True)
+
+            else:  # Remove rules
+                # self._remove_existing_rules(iptables_cmd, app_path, target_ip)     
+                try:
+                    output = subprocess.check_output([
+                        'sudo', iptables_cmd, '-L', chain_name, '--line-numbers', '-n'
+                    ]).decode()
+
+                    rule_numbers = []
+                    for line in output.split('\n'):
+                        if comment in line:
+                            try:
+                                rule_num = line.split()[0]
+                                rule_numbers.append(int(rule_num))
+                            except (IndexError, ValueError):
+                                continue
+                            
+                    for rule_num in sorted(rule_numbers, reverse=True):
+                        subprocess.run([
+                            'sudo', iptables_cmd, '-D', chain_name, str(rule_num)
+                        ], check=True)
+
+                    # If no rules left in chain, remove chain
+                    remaining_rules = subprocess.check_output([
+                        'sudo', iptables_cmd, '-L', chain_name, '-n'
+                    ]).decode()
+                    if 'Chain APP_' in remaining_rules and 'target' in remaining_rules:
+                        # Remove jump rule and chain
+                        subprocess.run([
+                            'sudo', iptables_cmd, '-D', 'OUTPUT', '-j', chain_name
+                        ], check=False)
+                        subprocess.run([
+                            'sudo', iptables_cmd, '-X', chain_name
+                        ], check=False)
+
+                except subprocess.CalledProcessError:
+                    self.logger.error(f"Failed to remove rules: {e}")
+                    return False
+
             return True
             
         except Exception as e:
@@ -322,6 +388,95 @@ class NetworkInterceptor:
         except socket.gaierror:
             self.logger.error(f"Failed to resolve domain: {domain}")
             return addresses
+    
+    # def force_cleanup_rules(self):
+    #     """Force cleanup of all firewall rules"""
+    #     try:
+    #         app_chains = set()
+    #         # Get all active rules
+    #         with sqlite3.connect(self.db_path) as conn:
+    #             cursor = conn.cursor()
+    #             cursor.execute('''
+    #                 SELECT app_name, target, target_type, resolved_ips 
+    #                 FROM blocking_rules 
+    #                 WHERE active = 1
+    #             ''')
+    #             rules = cursor.fetchall()
+                
+    #             for rule in rules:
+    #                 app_name, target, target_type, resolved_ips = rule
+    #                 # Remove rules for resolved IPs
+    #                 if resolved_ips:
+    #                     for ip in resolved_ips.split(','):
+    #                         self._remove_firewall_rules(app_name, ip.strip())
+                    
+    #                 # Also try target if it's an IP
+    #                 if target_type == 'ip':
+    #                     self._remove_firewall_rules(app_name, target)
+    
+    #         # Clean up any remaining rules with block_ comment
+    #         for cmd in ['iptables', 'ip6tables']:
+    #             try:
+    #                 output = subprocess.check_output(
+    #                     ['sudo', cmd, '-L', 'OUTPUT', '--line-numbers', '-n'],
+    #                     stderr=subprocess.PIPE
+    #                 ).decode()
+                    
+    #                 rule_numbers = []
+    #                 for line in output.split('\n'):
+    #                     if 'block_' in line:
+    #                         try:
+    #                             rule_num = line.split()[0]
+    #                             rule_numbers.append(int(rule_num))
+    #                         except (IndexError, ValueError):
+    #                             continue
+                            
+    #                 for rule_num in sorted(rule_numbers, reverse=True):
+    #                     subprocess.run(
+    #                         ['sudo', cmd, '-D', 'OUTPUT', str(rule_num)],
+    #                         check=True
+    #                     )
+    #             except subprocess.CalledProcessError:
+    #                 continue
+                
+    #     except Exception as e:
+    #         self.logger.error(f"Error in force cleanup: {e}")
+
+    def force_cleanup_rules(self):
+        """Force cleanup of all firewall rules"""
+        try:
+            # Get all rules to find app chains
+            app_chains = set()
+            for cmd in ['iptables', 'ip6tables']:
+                try:
+                    output = subprocess.check_output(
+                        ['sudo', cmd, '-L', '-n'],
+                        stderr=subprocess.PIPE
+                    ).decode()
+
+                    # Find all APP_ chains
+                    for line in output.split('\n'):
+                        if line.startswith('Chain APP_'):
+                            chain = line.split()[1]
+                            app_chains.add(chain)
+
+                    # Clean up chains
+                    for chain in app_chains:
+                        try:
+                            # Flush chain
+                            subprocess.run(['sudo', cmd, '-F', chain], check=True)
+                            # Remove jump rule
+                            subprocess.run(['sudo', cmd, '-D', 'OUTPUT', '-j', chain], check=False)
+                            # Delete chain
+                            subprocess.run(['sudo', cmd, '-X', chain], check=True)
+                        except subprocess.CalledProcessError:
+                            continue
+
+                except subprocess.CalledProcessError:
+                    continue
+
+        except Exception as e:
+            self.logger.error(f"Error in force cleanup: {e}")
 
     def add_blocking_rule(self, app_name: str, target: str) -> bool:
         """Add new blocking rule and create firewall rules"""
@@ -402,41 +557,116 @@ class NetworkInterceptor:
             self.logger.error(f"Database error: {e}")
             return False
     
+    def _remove_firewall_rules(self, app_name: str, target_ip: str) -> bool:
+        """Remove all firewall rules for this app and target"""
+        try:
+            # Generate comment pattern for matching
+            comment = f"block_{app_name}_{target_ip}"
+
+            # List and remove IPv4 rules
+            output = subprocess.check_output(
+                ['sudo', 'iptables', '-L', 'OUTPUT', '--line-numbers', '-n'],
+                stderr=subprocess.PIPE
+            ).decode()
+
+            # Find and remove rules in reverse order
+            rule_numbers = []
+            for line in output.split('\n'):
+                if comment in line:
+                    try:
+                        rule_num = line.split()[0]
+                        rule_numbers.append(int(rule_num))
+                    except (IndexError, ValueError):
+                        continue
+
+            for rule_num in sorted(rule_numbers, reverse=True):
+                subprocess.run(
+                    ['sudo', 'iptables', '-D', 'OUTPUT', str(rule_num)],
+                    check=True
+                )
+
+            # Also check and remove IPv6 rules if present
+            try:
+                output = subprocess.check_output(
+                    ['sudo', 'ip6tables', '-L', 'OUTPUT', '--line-numbers', '-n'],
+                    stderr=subprocess.PIPE
+                ).decode()
+
+                rule_numbers = []
+                for line in output.split('\n'):
+                    if comment in line:
+                        try:
+                            rule_num = line.split()[0]
+                            rule_numbers.append(int(rule_num))
+                        except (IndexError, ValueError):
+                            continue
+
+                for rule_num in sorted(rule_numbers, reverse=True):
+                    subprocess.run(
+                        ['sudo', 'ip6tables', '-D', 'OUTPUT', str(rule_num)],
+                        check=True
+                    )
+            except subprocess.CalledProcessError:
+                pass  # Ignore IPv6 errors
+
+            return True
+        except Exception as e:
+            self.logger.error(f"Error removing firewall rules: {e}")
+            return False
+
     def remove_blocking_rule(self, rule_id: int) -> bool:
-        """Remove blocking rule and associated firewall rules"""
+        """Remove blocking rule and cleanup firewall rules"""
         try:
             with sqlite3.connect(self.db_path) as conn:
+                # First get rule details before removing
                 cursor = conn.cursor()
-                
-                # Get rule details first
                 cursor.execute('''
                     SELECT app_name, target, target_type, resolved_ips 
                     FROM blocking_rules 
                     WHERE id = ? AND active = 1
                 ''', (rule_id,))
-                
+
                 rule = cursor.fetchone()
                 if not rule:
                     return False
-                
+
                 app_name, target, target_type, resolved_ips = rule
-                
-                # Remove firewall rules
-                for ip in resolved_ips.split(','):
-                    if not self.create_firewall_rule(app_name, ip, 'remove'):
-                        self.logger.error(f"Failed to remove firewall rule for {app_name} -> {ip}")
-                        return False
-                
-                # Update database
+
+                # Remove firewall rules for all resolved IPs
+                if resolved_ips:
+                    for ip in resolved_ips.split(','):
+                        self._remove_firewall_rules(app_name, ip.strip())
+
+                # Also try removing rules for the target if it's an IP
+                if target_type == 'ip':
+                    self._remove_firewall_rules(app_name, target)
+
+                # Then deactivate the rule
                 cursor.execute('''
                     UPDATE blocking_rules 
                     SET active = 0 
                     WHERE id = ?
                 ''', (rule_id,))
-                
-                self.logger.info(f"Removed blocking rule ID: {rule_id}")
+                conn.commit()
+
                 return True
-                
+
+        except sqlite3.Error as e:
+            self.logger.error(f"Database error: {e}")
+            return False
+        
+    def update_resolved_ips(self, rule_id: int, ips: set) -> bool:
+        """Update resolved IPs for a rule"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE blocking_rules
+                    SET resolved_ips = ?
+                    WHERE id = ?
+                ''', (','.join(ips), rule_id))
+                conn.commit()
+                return True
         except sqlite3.Error as e:
             self.logger.error(f"Database error: {e}")
             return False
@@ -447,7 +677,7 @@ class NetworkInterceptor:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
-                    SELECT id, app_name, target, target_type, resolved_ips 
+                    SELECT id, app_name, target, target_type, IFNULL(resolved_ips, '') 
                     FROM blocking_rules 
                     WHERE active = 1
                 ''')
