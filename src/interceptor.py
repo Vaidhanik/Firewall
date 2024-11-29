@@ -1,15 +1,11 @@
 import os
-import pwd
-import grp
 import socket
 import sqlite3
 import logging
 import platform
 import subprocess
 from pathlib import Path
-from datetime import datetime
-from typing import Optional, Tuple, List
-from processmanager import ProcessManager
+from typing import Tuple, List
 
 class NetworkInterceptor:
     def __init__(self, db_path: str = "interceptor.db"):
@@ -458,59 +454,6 @@ class NetworkInterceptor:
             self.logger.error(f"Failed to resolve domain: {domain}")
             return addresses
     
-    # def force_cleanup_rules(self):
-    #     """Force cleanup of all firewall rules"""
-    #     try:
-    #         app_chains = set()
-    #         # Get all active rules
-    #         with sqlite3.connect(self.db_path) as conn:
-    #             cursor = conn.cursor()
-    #             cursor.execute('''
-    #                 SELECT app_name, target, target_type, resolved_ips 
-    #                 FROM blocking_rules 
-    #                 WHERE active = 1
-    #             ''')
-    #             rules = cursor.fetchall()
-                
-    #             for rule in rules:
-    #                 app_name, target, target_type, resolved_ips = rule
-    #                 # Remove rules for resolved IPs
-    #                 if resolved_ips:
-    #                     for ip in resolved_ips.split(','):
-    #                         self._remove_firewall_rules(app_name, ip.strip())
-                    
-    #                 # Also try target if it's an IP
-    #                 if target_type == 'ip':
-    #                     self._remove_firewall_rules(app_name, target)
-    
-    #         # Clean up any remaining rules with block_ comment
-    #         for cmd in ['iptables', 'ip6tables']:
-    #             try:
-    #                 output = subprocess.check_output(
-    #                     ['sudo', cmd, '-L', 'OUTPUT', '--line-numbers', '-n'],
-    #                     stderr=subprocess.PIPE
-    #                 ).decode()
-                    
-    #                 rule_numbers = []
-    #                 for line in output.split('\n'):
-    #                     if 'block_' in line:
-    #                         try:
-    #                             rule_num = line.split()[0]
-    #                             rule_numbers.append(int(rule_num))
-    #                         except (IndexError, ValueError):
-    #                             continue
-                            
-    #                 for rule_num in sorted(rule_numbers, reverse=True):
-    #                     subprocess.run(
-    #                         ['sudo', cmd, '-D', 'OUTPUT', str(rule_num)],
-    #                         check=True
-    #                     )
-    #             except subprocess.CalledProcessError:
-    #                 continue
-                
-    #     except Exception as e:
-    #         self.logger.error(f"Error in force cleanup: {e}")
-
     def force_cleanup_rules(self):
         """Force cleanup of all firewall rules"""
         try:
@@ -625,64 +568,7 @@ class NetworkInterceptor:
         except sqlite3.Error as e:
             self.logger.error(f"Database error: {e}")
             return False
-    
-    # def _remove_firewall_rules(self, app_name: str, target_ip: str) -> bool:
-    #     """Remove all firewall rules for this app and target"""
-    #     try:
-    #         # Generate comment pattern for matching
-    #         comment = f"block_{app_name}_{target_ip}"
-
-    #         # List and remove IPv4 rules
-    #         output = subprocess.check_output(
-    #             ['sudo', 'iptables', '-L', 'OUTPUT', '--line-numbers', '-n'],
-    #             stderr=subprocess.PIPE
-    #         ).decode()
-
-    #         # Find and remove rules in reverse order
-    #         rule_numbers = []
-    #         for line in output.split('\n'):
-    #             if comment in line:
-    #                 try:
-    #                     rule_num = line.split()[0]
-    #                     rule_numbers.append(int(rule_num))
-    #                 except (IndexError, ValueError):
-    #                     continue
-
-    #         for rule_num in sorted(rule_numbers, reverse=True):
-    #             subprocess.run(
-    #                 ['sudo', 'iptables', '-D', 'OUTPUT', str(rule_num)],
-    #                 check=True
-    #             )
-
-    #         # Also check and remove IPv6 rules if present
-    #         try:
-    #             output = subprocess.check_output(
-    #                 ['sudo', 'ip6tables', '-L', 'OUTPUT', '--line-numbers', '-n'],
-    #                 stderr=subprocess.PIPE
-    #             ).decode()
-
-    #             rule_numbers = []
-    #             for line in output.split('\n'):
-    #                 if comment in line:
-    #                     try:
-    #                         rule_num = line.split()[0]
-    #                         rule_numbers.append(int(rule_num))
-    #                     except (IndexError, ValueError):
-    #                         continue
-
-    #             for rule_num in sorted(rule_numbers, reverse=True):
-    #                 subprocess.run(
-    #                     ['sudo', 'ip6tables', '-D', 'OUTPUT', str(rule_num)],
-    #                     check=True
-    #                 )
-    #         except subprocess.CalledProcessError:
-    #             pass  # Ignore IPv6 errors
-
-    #         return True
-    #     except Exception as e:
-    #         self.logger.error(f"Error removing firewall rules: {e}")
-    #         return False
-    
+        
     def _cleanup_app_cgroup(self, process_name: str):
         """Clean up cgroup for an application"""
         try:

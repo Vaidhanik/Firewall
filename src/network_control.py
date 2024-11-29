@@ -1,7 +1,6 @@
 import os
 import time
 import json
-import signal
 import multiprocessing
 from pathlib import Path
 from datetime import datetime
@@ -12,7 +11,6 @@ from typing import Dict, List, Set, Optional, Tuple
 
 from proxy import ProxyInterceptor
 import subprocess
-import threading
 class NetworkController:
     def __init__(self):
         """Initialize the network control system"""
@@ -221,21 +219,6 @@ class NetworkController:
             if hasattr(self.monitor, '_cleanup'):
                 self.monitor._cleanup()
    
-    # def stop_monitor(self) -> bool:
-    #     """Stop the detached monitoring process"""
-    #     if self.monitor_process and self.monitor_process.is_alive():
-    #         self.monitor_running.value = False
-    #         self.monitor_process.join(timeout=5)
-
-    #         if self.monitor_process.is_alive():
-    #             self.monitor_process.terminate()
-
-    #         print("\n✓ Monitoring stopped")
-    #         return True
-    #     else:
-    #         print("\nNo monitoring process is running")
-    #         return False
-    
     def get_monitor_status(self) -> Dict:
         """Get status of monitoring process"""
         if self.monitor_process and self.monitor_process.is_alive():

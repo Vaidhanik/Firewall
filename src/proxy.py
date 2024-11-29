@@ -1,14 +1,11 @@
 import time
-import json
 import queue
 import psutil
-import socket
 import sqlite3
 import logging
 import asyncio
 import threading
 from pathlib import Path
-from datetime import datetime
 from mitmproxy import ctx, http
 from mitmproxy.tools import dump
 from mitmproxy.script import concurrent
