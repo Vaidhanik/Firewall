@@ -275,24 +275,43 @@ class NetworkController:
 
     def _update_rule_cache(self) -> None:
         """Update the cached rules if cache timeout exceeded"""
-        current_time = time.time()
-        if current_time - self.last_cache_update > self.CACHE_TIMEOUT:
-            rules = self.interceptor.get_active_rules()
-            self.rule_cache = {}
-            
-            for rule in rules:
-                rule_id, app_name, target, target_type, resolved_ips = rule
-                if app_name not in self.rule_cache:
-                    self.rule_cache[app_name] = []
-                self.rule_cache[app_name].append({
-                    'id': rule_id,
-                    'target': target,
-                    'type': target_type,
-                    'ips': set(resolved_ips.split(','))
-                })
-            
-            self.last_cache_update = current_time
-            self.stats['active_rules'] = len(rules)
+        try:
+            current_time = time.time()
+            if current_time - self.last_cache_update > self.CACHE_TIMEOUT:
+                rules = self.interceptor.get_active_rules()
+                # Clear existing cache
+                self.rule_cache = {}
+                
+                if not rules:  # If no rules exist
+                    self.last_cache_update = current_time
+                    self.stats['active_rules'] = 0
+                    return
+                
+                for rule in rules:
+                    rule_id, app_name, target, target_type, resolved_ips = rule
+                    if app_name not in self.rule_cache:
+                        self.rule_cache[app_name] = []
+                    
+                    # Handle empty resolved_ips
+                    if not resolved_ips:
+                        if target_type == 'domain':
+                            resolved_ips = ','.join(self.interceptor.resolve_domain(target))
+                        else:
+                            resolved_ips = target
+    
+                    self.rule_cache[app_name].append({
+                        'id': rule_id,
+                        'target': target,
+                        'type': target_type,
+                        'ips': set(ip.strip() for ip in resolved_ips.split(',') if ip.strip())
+                    })
+                
+                self.last_cache_update = current_time
+                self.stats['active_rules'] = len(rules)
+        except Exception as e:
+            print(f"Error updating rule cache: {e}")
+            self.rule_cache = {}  # Reset cache on error
+            self.stats['active_rules'] = 0
 
     def check_connection_allowed(self, conn: Dict) -> Tuple[bool, Optional[Dict]]:
         """
