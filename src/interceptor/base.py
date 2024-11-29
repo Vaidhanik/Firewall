@@ -2,12 +2,14 @@ import socket
 import logging
 from pathlib import Path
 from abc import ABC, abstractmethod
+from .database import DatabaseHandler
 
 class BaseInterceptor(ABC):
     """Base class for all platform-specific interceptors"""
     
     def __init__(self):
         self.logger = logging.getLogger('interceptor')
+        self.db = DatabaseHandler()
         
     def setup_logging(self):
         """Setup logging for interceptor"""
