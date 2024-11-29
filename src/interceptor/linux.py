@@ -449,27 +449,11 @@ class LinuxInterceptor(BaseInterceptor):
         except Exception as e:
             self.logger.error(f"Error removing blocking rule: {e}")
             return False
-           
-    def create_rule(self, app_path: str, target_ip: str, action: str = 'add') -> bool:
-        """Create iptables rules for application"""
-        try:
-            if ':' in target_ip:  # IPv6
-                return self._create_linux_rules(app_path, target_ip, 'ipv6', action)
-            else:  # IPv4
-                return self._create_linux_rules(app_path, target_ip, 'ipv4', action)
-        except Exception as e:
-            self.logger.error(f"Error in create_rule: {e}")
-            return False
-                
-    def remove_rule(self, rule_id: int) -> bool:
-        """Remove firewall rules for application"""
-        # This is just a wrapper that calls create_rule with action='remove'
-        return self.remove_blocking_rule(rule_id)
     
-    def cleanup_rules(self) -> bool:
+    def force_cleanup_rules(self):
         """Force cleanup of all firewall rules"""
         try:
-            # Get all APP_ chains
+            # Get all rules to find app chains
             app_chains = set()
             for cmd in ['iptables', 'ip6tables']:
                 try:
@@ -487,8 +471,11 @@ class LinuxInterceptor(BaseInterceptor):
                     # Clean up chains
                     for chain in app_chains:
                         try:
+                            # Flush chain
                             subprocess.run(['sudo', cmd, '-F', chain], check=True)
+                            # Remove jump rule
                             subprocess.run(['sudo', cmd, '-D', 'OUTPUT', '-j', chain], check=False)
+                            # Delete chain
                             subprocess.run(['sudo', cmd, '-X', chain], check=True)
                         except subprocess.CalledProcessError:
                             continue
@@ -496,9 +483,15 @@ class LinuxInterceptor(BaseInterceptor):
                 except subprocess.CalledProcessError:
                     continue
 
-            return True
-
         except Exception as e:
-            self.logger.error(f"Error in cleanup: {e}")
-            return False
-        
+            self.logger.error(f"Error in force cleanup: {e}")
+
+    def get_process_info(self, pid: str) -> dict:
+        """Get process information including executable path and user"""
+        try:
+            process = subprocess.check_output(['ps', '-p', pid, '-o', 'user,comm'], 
+                                           universal_newlines=True).split('\n')[1]
+            user, comm = process.strip().split()
+            return {'user': user, 'command': comm}
+        except:
+            return {'user': None, 'command': None}

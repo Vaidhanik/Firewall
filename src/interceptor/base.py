@@ -67,16 +67,21 @@ class BaseInterceptor(ABC):
                 return False
     
     @abstractmethod
-    def create_rule(self, app_path: str, target_ip: str, action: str = 'add') -> bool:
+    def add_blocking_rule(self, app_name: str, target: str) -> bool:
         """Create firewall rule - must be implemented by platform-specific classes"""
         pass
         
     @abstractmethod
-    def remove_rule(self, app_path: str, target_ip: str) -> bool:
+    def remove_blocking_rule(self, rule_id: int) -> bool:
         """Remove firewall rule - must be implemented by platform-specific classes"""
         pass
         
     @abstractmethod
-    def cleanup_rules(self) -> bool:
+    def force_cleanup_rules(self):
+        """Cleanup all rules - must be implemented by platform-specific classes"""
+        pass
+    
+    @abstractmethod
+    def get_process_info(self, pid: str) -> dict:
         """Cleanup all rules - must be implemented by platform-specific classes"""
         pass
