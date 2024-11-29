@@ -16,12 +16,16 @@ def test_connections(urls):
                 time.sleep(2)
 
 if __name__ == "__main__":
-    test_urls = [
-        'https://google.com',
-        'https://x.com',
-        'https://github.com',
-    ]
-    test_connections(test_urls)
+    # Check if input is provided
+    if len(sys.argv) > 1:
+        input_urls = sys.argv[1:]  # Take input strings from the command line
+    else:
+        input_urls = input("Enter URLs (comma-separated): ").split(",")  # Take interactive input
+
+    # Clean and prepare the URL list
+    urls = [url.strip() for url in input_urls if url.strip()]
+    test_connections(urls)
+
 
 # test_api.py
 # import requests

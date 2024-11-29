@@ -142,17 +142,32 @@ class NetworkController:
         return False
 
     def unblock_app_network(self, rule_id: int) -> bool:
-        """Remove blocking rule for application"""
-        if self.interceptor.remove_blocking_rule(rule_id):
-            # Force cache update
-            self.last_cache_update = 0
-            print(f"✓ Removed blocking rule {rule_id}")
-            
-            # Update statistics
-            self._update_rule_cache()
-            return True
-            
-        return False
+        """Enhanced unblock method"""
+        try:
+            # Get rule details before removing
+            blocks = self.get_active_blocks()
+            rule = next((b for b in blocks if b['id'] == rule_id), None)
+
+            if not rule:
+                print(f"Rule {rule_id} not found or already removed")
+                return False
+
+            # Remove from interceptor
+            result = self._unblock_app_network(rule_id)
+
+            if result:
+                # Remove from proxy
+                self.proxy.remove_blocking_rule(rule_id)
+
+                # Force cache update
+                self.last_cache_update = 0
+                self._update_rule_cache()
+
+            return result
+
+        except Exception as e:
+            print(f"Error removing rule: {e}")
+            return False
 
     def get_active_blocks(self) -> List[Dict]:
         """Get list of active blocking rules"""
@@ -309,14 +324,16 @@ class NetworkController:
             
             # Cleanup interceptor rules if needed
             if hasattr(self, 'interceptor'):
-                active_blocks = self.get_active_blocks()
-                if active_blocks:
-                    print("\nCleaning up firewall rules...")
-                    for block in active_blocks:
-                        try:
-                            self.unblock_app_network(block['id'])
-                        except:
-                            print(f"Failed to remove rule for {block['app']} -> {block['target']}")
+                # @dev >>>>>> DONT REMOVE THIS SEC.
+                # active_blocks = self.get_active_blocks()
+                # if active_blocks:
+                #     print("\nCleaning up firewall rules...")
+                #     for block in active_blocks:
+                #         try:
+                #             self.unblock_app_network(block['id'])
+                #         except:
+                #             print(f"Failed to remove rule for {block['app']} -> {block['target']}")
+                self.interceptor.force_cleanup_rules()
                             
         except Exception as e:
             print(f"\nWarning: Cleanup encountered errors: {e}")
