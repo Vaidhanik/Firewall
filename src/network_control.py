@@ -1,4 +1,5 @@
 import os
+import platform
 import time
 import json
 import multiprocessing
@@ -17,7 +18,24 @@ class NetworkController:
         # Initialize components
         self.proxy = ProxyInterceptor()
         self.monitor = NetworkMonitor()
-        self.interceptor = NetworkInterceptor()
+
+
+        # self.interceptor = NetworkInterceptor()
+        os_type = platform.system().lower()
+        if os_type == 'linux':
+            self.interceptor = LinuxInterceptor()
+        elif os_type == 'darwin':
+            self.interceptor = MacOSInterceptor()
+        elif os_type == 'windows':
+            self.interceptor = WindowsInterceptor()
+        else:
+            raise NotImplementedError(f"Unsupported operating system: {os_type}")
+    
+        # Setup logging
+        self.interceptor.setup_logging()
+        self.logger = self.interceptor.logger
+
+
         self.installed_apps = self.load_installed_apps()
         
         self.proxy_thread = None
