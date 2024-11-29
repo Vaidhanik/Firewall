@@ -68,3 +68,11 @@ fw-linux-d:
 fw-linux-rm:
 	sudo iptables -F
 	sudo iptables -X
+
+#====================================================================================#
+
+# Cleanup
+
+cleanup:
+	sudo rm -rf $(FIREWALL_DIR)/src/logs
+	sudo rm -rf $(FIREWALL_DIR)/logs
