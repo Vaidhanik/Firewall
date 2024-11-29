@@ -4,6 +4,7 @@ from .linux import LinuxInterceptor
 from .macos import MacOSInterceptor
 from .database import DatabaseHandler
 from .windows import WindowsInterceptor
+from .base import BaseInterceptor
 
 class NetworkInterceptor():
     """Main network interceptor class that handles platform-specific implementations"""
@@ -34,6 +35,14 @@ class NetworkInterceptor():
     def resolve_domain(self, domain: str) -> dict:
         """Resolve domain to both IPv4 and IPv6 addresses"""
         return self.interceptor.resolve_domain(domain)
+    
+    def update_resolved_ips(self, rule_id: int, ips: List[str]) -> bool:
+        """Resolve domain to both IPv4 and IPv6 addresses"""
+        return self.interceptor.db.update_resolved_ips(rule_id, ips)
+    
+    def get_process_info(self, pid: str) -> dict:
+        """Resolve domain to both IPv4 and IPv6 addresses"""
+        return self.interceptor.get_process_info(pid)
 
     def add_blocking_rule(self, app_name: str, target: str) -> bool:
         """Add new blocking rule"""
@@ -47,9 +56,9 @@ class NetworkInterceptor():
         """Get all active blocking rules"""
         return self.db.get_active_rules()
         
-    def cleanup_rules(self) -> bool:
-        """Clean up all rules"""
-        return self.interceptor.cleanup_rules()
+    def force_cleanup_rules(self):
+        """Force cleanup of all firewall rules"""
+        return self.interceptor.force_cleanup_rules()
         
     def log_blocked_attempt(self, rule_id: int, app_name: str, 
                           source_ip: str, target: str, details: str):
