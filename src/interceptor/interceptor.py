@@ -41,7 +41,6 @@ class NetworkInterceptor():
 
     def remove_blocking_rule(self, rule_id: int) -> bool:
         """Remove blocking rule"""
-        print("remove_blocking_rule")
         return self.interceptor.remove_blocking_rule(rule_id)
 
     def get_active_rules(self) -> List[Tuple]:
