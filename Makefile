@@ -10,7 +10,7 @@ run-panel:
 	sudo $(FIREWALL_DIR)/test/.firewall/bin/python3 ./src/network_control.py
 
 test-firewall:
-	$(FIREWALL_DIR)/test/.firewall/bin/python3 ./test/tester.py
+	$(FIREWALL_DIR)/test/.firewall/bin/python3 ./test/tester.py $(URLS)
 
 build:
 	sudo docker compose build --no-cache
