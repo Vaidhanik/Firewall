@@ -66,5 +66,5 @@ fw-linux-d:
 	sudo ip6tables -L OUTPUT -n
 
 fw-linux-rm:
-	sudo iptables -F OUTPUT
-	sudo ip6tables -F OUTPUT
+	sudo iptables -F
+	sudo iptables -X
