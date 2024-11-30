@@ -2,114 +2,130 @@ import subprocess
 import socket
 import re
 from typing import Dict, List, Optional
-from src.monitor.base import NetworkMonitorBase
+from monitor.base import NetworkMonitorBase
 
 class WindowsNetworkMonitor(NetworkMonitorBase):
     def get_all_interface_macs(self) -> Dict[str, str]:
         """Get MAC addresses of all network interfaces using Windows commands"""
         interfaces = {}
         try:
-            output = subprocess.check_output("ipconfig /all", universal_newlines=True)
-            current_interface = None
-            current_mac = None
-            
+            # Using getmac command for more reliable MAC retrieval
+            output = subprocess.check_output("getmac /v /fo csv /nh", universal_newlines=True)
             for line in output.split('\n'):
-                if ': ' in line:
-                    if 'adapter' in line.lower():
-                        current_interface = line.split(':')[0].strip()
-                        current_mac = None
-                    elif 'physical address' in line.lower():
-                        current_mac = line.split(':')[1].strip()
-                        if current_interface and current_mac:
-                            interfaces[current_interface] = current_mac
-                            
-        except subprocess.CalledProcessError:
-            print("Error getting network interfaces")
+                if line.strip():
+                    try:
+                        # Parse CSV output from getmac
+                        parts = line.strip().split(',')
+                        if len(parts) >= 3:
+                            interface_name = parts[0].strip('"')
+                            mac = parts[1].strip('"').replace('-', ':').upper()
+                            if mac != 'N/A':
+                                interfaces[interface_name] = mac
+                                # print(f"Found interface: {interface_name} -> MAC: {mac}")  # Debug print
+                    except Exception as e:
+                        print(f"Error parsing interface line: {e}")
+                        
+        except subprocess.CalledProcessError as e:
+            print(f"Error getting network interfaces: {e}")
         
         return interfaces
 
     def get_mac_address(self, ip: str) -> Optional[str]:
-        """Get MAC address for an IP using Windows ARP table"""
+        """Get MAC address for an IP using Windows commands, supporting both IPv4 and IPv6"""
         if ip in ['0.0.0.0', '::', '*', '127.0.0.1', '::1']:
             return None
 
-        try:
-            # First try to ping the IP to ensure it's in the ARP table
-            if ip.startswith(('192.168.', '10.', '172.')):
-                try:
-                    subprocess.run(["ping", "-n", "1", "-w", "1000", ip], 
-                                 stdout=subprocess.DEVNULL, 
-                                 stderr=subprocess.DEVNULL)
-                except:
-                    pass
-
-            # Use arp -a to get MAC address
+        # Check if it's an IPv6 address
+        if ':' in ip and '.' not in ip:  # IPv6 check
             try:
-                output = subprocess.check_output(["arp", "-a", ip], universal_newlines=True)
-                # Windows ARP output format: "Internet Address      Physical Address      Type"
-                lines = output.split('\n')
-                for line in lines:
-                    if ip in line:
-                        # Extract MAC address using regex
-                        mac_match = re.search(r"([0-9A-F]{2}[-][0-9A-F]{2}[-][0-9A-F]{2}[-][0-9A-F]{2}[-][0-9A-F]{2}[-][0-9A-F]{2})", line.upper())
-                        if mac_match:
-                            # Convert Windows format (XX-XX-XX-XX-XX-XX) to standard format (XX:XX:XX:XX:XX:XX)
-                            return mac_match.group(1).replace('-', ':')
-            except:
-                pass
-
-            # Alternative method using getmac command
-            try:
-                output = subprocess.check_output(f"getmac /NH /V /FO CSV", universal_newlines=True)
+                # For IPv6, first try to ping to update neighbor cache
+                subprocess.run(
+                    ['ping', '-6', '-n', '1', '-w', '1000', ip],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                
+                # Use netsh command for IPv6
+                output = subprocess.check_output(
+                    ['netsh', 'interface', 'ipv6', 'show', 'neighbors'],
+                    universal_newlines=True
+                )
+                # print(f"IPv6 neighbors output for {ip}:")  # Debug print
+                # print(output)  # Debug print
+                
                 for line in output.split('\n'):
-                    if line and ip in line:
+                    if ip in line:
+                        # Look for MAC address format
+                        mac_match = re.search(r"([0-9a-fA-F]{2}-[0-9a-fA-F]{2}-[0-9a-fA-F]{2}-[0-9a-fA-F]{2}-[0-9a-fA-F]{2}-[0-9a-fA-F]{2})", line)
+                        if mac_match:
+                            mac = mac_match.group(1).replace('-', ':').upper()
+                            # print(f"Found IPv6 MAC: {mac}")  # Debug print
+                            return mac
+            except Exception as e:
+                print(f"IPv6 MAC detection error for {ip}: {str(e)}")
+
+        else:  # IPv4
+            try:
+                # Ensure IP is in ARP cache
+                subprocess.run(
+                    ['ping', '-n', '1', '-w', '1000', ip],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+
+                # Try using arp -a
+                output = subprocess.check_output(['arp', '-a'], universal_newlines=True)
+                # print(f"ARP table output for {ip}:")  # Debug print
+                # print(output)  # Debug print
+                
+                for line in output.split('\n'):
+                    if ip in line:
+                        # Look for MAC address in format XX-XX-XX-XX-XX-XX
+                        mac_match = re.search(r"([0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2})", line)
+                        if mac_match:
+                            mac = mac_match.group(1).replace('-', ':').upper()
+                            # print(f"Found IPv4 MAC: {mac}")  # Debug print
+                            return mac
+
+                # Try using getmac as fallback
+                output = subprocess.check_output(f'getmac /v /NH /FO CSV', universal_newlines=True)
+                for line in output.split('\n'):
+                    if ip in line:
                         parts = line.split(',')
                         if len(parts) >= 2:
-                            mac = parts[1].strip('" ')
-                            return mac.replace('-', ':')
-            except:
-                pass
+                            mac = parts[1].strip('" ').replace('-', ':').upper()
+                            if mac != 'N/A':
+                                # print(f"Found MAC via getmac: {mac}")  # Debug print
+                                return mac
 
-        except Exception as e:
-            print(f"Debug - MAC detection error for {ip}: {str(e)}")
-        
+            except Exception as e:
+                print(f"IPv4 MAC detection error for {ip}: {str(e)}")
+
         return None
 
     def get_interface_by_ip(self, ip: str) -> Optional[str]:
         """Get network interface name for an IP address in Windows"""
         try:
-            # Use ipconfig to find the interface
-            output = subprocess.check_output("ipconfig /all", universal_newlines=True)
+            # Use ipconfig with more detailed parsing
+            output = subprocess.check_output(['ipconfig', '/all'], universal_newlines=True)
             current_interface = None
             
             for line in output.split('\n'):
                 line = line.strip()
                 
-                if line.endswith(':') and 'adapter' in line.lower():
-                    current_interface = line[:-1].strip()
-                elif 'IPv4 Address' in line and ip in line:
-                    return current_interface
-                # Also check for IPv6 addresses
-                elif 'IPv6 Address' in line and ip in line:
-                    return current_interface
-
-            # Alternative method using route print
-            output = subprocess.check_output("route print", universal_newlines=True)
-            for line in output.split('\n'):
-                if ip in line:
-                    parts = line.split()
-                    if len(parts) >= 4:
-                        interface_number = parts[3]
-                        # Get interface name from number
-                        output = subprocess.check_output(f"netsh interface show interface", universal_newlines=True)
-                        for iface_line in output.split('\n'):
-                            if interface_number in iface_line:
-                                return iface_line.split()[-1]
-        except:
-            pass
+                if 'adapter' in line.lower() and ':' in line:
+                    current_interface = line.split(':')[0].strip()
+                elif any(addr_type in line for addr_type in ['IPv4 Address', 'IPv6 Address', 'IP Address']):
+                    # Extract IP from the line
+                    ip_match = re.search(r":\s*([0-9a-fA-F:\.]+)", line)
+                    if ip_match and ip_match.group(1).strip('() ') == ip:
+                        # print(f"Found interface for IP {ip}: {current_interface}")  # Debug print
+                        return current_interface
+            
+        except Exception as e:
+            print(f"Error finding interface for IP {ip}: {e}")
         
         return None
-
     def get_connections(self) -> List[Dict]:
         """Get both TCP and UDP connections using netstat for Windows"""
         connections = []
