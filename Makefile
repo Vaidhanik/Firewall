@@ -137,4 +137,4 @@ fw-linux-rm:
 
 cleanup:
 	sudo rm -rf $(FIREWALL_DIR)/logs
-	sudo rm -rf $(FIREWALL_DIR)/src/network_controller/logs
+	sudo rm -rf $(FIREWALL_DIR)/src/monitor/logs
