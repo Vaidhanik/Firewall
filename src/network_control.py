@@ -1,5 +1,4 @@
 import os
-import platform
 import time
 import json
 import multiprocessing
@@ -7,9 +6,6 @@ from pathlib import Path
 from datetime import datetime
 from monitor import NetworkMonitor
 from system import get_installed_apps
-# from interceptor.linux import LinuxInterceptor
-# from interceptor.macos import MacOSInterceptor
-# from interceptor.windows import WindowsInterceptor
 from interceptor import NetworkInterceptor
 from typing import Dict, List, Set, Optional, Tuple
 
@@ -23,15 +19,6 @@ class NetworkController:
         self.monitor = NetworkMonitor()
 
         self.interceptor = NetworkInterceptor()
-        # os_type = platform.system().lower()
-        # if os_type == 'linux':
-        #     self.interceptor = LinuxInterceptor()
-        # elif os_type == 'darwin':
-        #     self.interceptor = MacOSInterceptor()
-        # elif os_type == 'windows':
-        #     self.interceptor = WindowsInterceptor()
-        # else:
-        #     raise NotImplementedError(f"Unsupported operating system: {os_type}")
     
         # Setup logging
         self.interceptor.setup_logging()
