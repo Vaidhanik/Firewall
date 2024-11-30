@@ -4,8 +4,8 @@ import multiprocessing
 from pathlib import Path
 from datetime import datetime
 
+from monitor import MonitorFactory
 from interceptor import NetworkInterceptor
-from network_controller.monitor import NetworkMonitor
 from network_controller.proxy import ProxyInterceptor
 from network_controller.system import get_installed_apps
 from network_controller.internal import InternalController
@@ -17,9 +17,9 @@ class NetworkController:
         """Initialize the network control system"""
         # Initialize components
         self.proxy = ProxyInterceptor()
-        self.monitor = NetworkMonitor()
         self.internal = InternalController()
         self.interceptor = NetworkInterceptor()
+        self.monitor = MonitorFactory().create_monitor()
     
         # Setup logging
         self.interceptor.setup_logging()
