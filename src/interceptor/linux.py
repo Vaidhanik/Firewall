@@ -495,3 +495,9 @@ class LinuxInterceptor(BaseInterceptor):
             return {'user': user, 'command': comm}
         except:
             return {'user': None, 'command': None}
+        
+    def create_rule(self, app_path: str, target_ip: str, action: str = 'add') -> bool:
+        if ':' in target_ip:  # IPv6
+            return self._create_linux_rules(app_path, target_ip, 'ipv6', action)
+        else:  # IPv4
+            return self._create_linux_rules(app_path, target_ip, 'ipv4', action)
