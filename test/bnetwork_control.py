@@ -1,19 +1,15 @@
 import os
-import platform
 import time
 import json
 import multiprocessing
 from pathlib import Path
 from datetime import datetime
-from monitor import NetworkMonitor
-from system import get_installed_apps
-# from interceptor.linux import LinuxInterceptor
-# from interceptor.macos import MacOSInterceptor
-# from interceptor.windows import WindowsInterceptor
+from network_controller.monitor import NetworkMonitor
+from network_controller.system import get_installed_apps
 from interceptor import NetworkInterceptor
 from typing import Dict, List, Set, Optional, Tuple
 
-from proxy import ProxyInterceptor
+from network_controller.proxy import ProxyInterceptor
 import subprocess
 class NetworkController:
     def __init__(self):
@@ -23,15 +19,6 @@ class NetworkController:
         self.monitor = NetworkMonitor()
 
         self.interceptor = NetworkInterceptor()
-        # os_type = platform.system().lower()
-        # if os_type == 'linux':
-        #     self.interceptor = LinuxInterceptor()
-        # elif os_type == 'darwin':
-        #     self.interceptor = MacOSInterceptor()
-        # elif os_type == 'windows':
-        #     self.interceptor = WindowsInterceptor()
-        # else:
-        #     raise NotImplementedError(f"Unsupported operating system: {os_type}")
     
         # Setup logging
         self.interceptor.setup_logging()
@@ -392,32 +379,39 @@ class NetworkController:
             
         return result
 
-    def _unblock_app_network(self, rule_id: int) -> bool:
+    # def _unblock_app_network(self, rule_id: int) -> bool:
+    #     """Remove blocking rule for application"""
+    #     if self.interceptor.remove_blocking_rule(rule_id):
+    #         # Force cache update
+    #         self.last_cache_update = 0
+    #         print(f"✓ Removed blocking rule {rule_id}")
+            
+    #         # Update statistics
+    #         self._update_rule_cache()
+    #         return True
+            
+    #     return False
+    
+    def unblock_app_network(self, rule_id: int) -> bool:
         """Remove blocking rule for application"""
+        # Get rule details before removing
+        blocks = self.get_active_blocks()
+        rule = next((b for b in blocks if b['id'] == rule_id), None)
+        
         if self.interceptor.remove_blocking_rule(rule_id):
             # Force cache update
             self.last_cache_update = 0
             print(f"✓ Removed blocking rule {rule_id}")
+            
+            # Also remove from proxy if running
+            if self.proxy_running and rule:
+                self.proxy.remove_blocking_rule(rule_id)
             
             # Update statistics
             self._update_rule_cache()
             return True
             
         return False
-    
-    def unblock_app_network(self, rule_id: int) -> bool:
-        """Enhanced unblock method"""
-        # Get rule details before removing
-        blocks = self.get_active_blocks()
-        rule = next((b for b in blocks if b['id'] == rule_id), None)
-        
-        result = self._unblock_app_network(rule_id)
-        
-        # Also remove from proxy
-        if result and rule:
-            self.proxy.remove_blocking_rule(rule_id)
-            
-        return result
 
     def get_active_blocks(self) -> List[Dict]:
         """Get list of active blocking rules"""
@@ -778,7 +772,7 @@ def main():
                 
         elif choice == "10":
             print("\nCleaning up and exiting...")
-            controller._cleanup()
+            controller.cleanup()
             break
             
         else:

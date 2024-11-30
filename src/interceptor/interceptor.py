@@ -4,7 +4,6 @@ from .linux import LinuxInterceptor
 from .macos import MacOSInterceptor
 from .database import DatabaseHandler
 from .windows import WindowsInterceptor
-from .base import BaseInterceptor
 
 class NetworkInterceptor():
     """Main network interceptor class that handles platform-specific implementations"""
