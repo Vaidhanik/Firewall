@@ -53,8 +53,10 @@ block-app:
 		jq '.'
 
 run-tracer:
-	sudo rm -rf src/network_controller/logs
-	sudo $(FIREWALL_DIR)/test/.firewall/bin/python3 ./src/network_controller/monitor.py
+# sudo rm -rf src/network_controller/logs
+	sudo rm -rf src/monitor/logs
+# sudo $(FIREWALL_DIR)/test/.firewall/bin/python3 ./src/network_controller/monitor.py
+	sudo $(FIREWALL_DIR)/test/.firewall/bin/python3 ./src/run_tracer.py
 
 run-panel:
 	sudo rm -rf logs
@@ -135,4 +137,4 @@ fw-linux-rm:
 
 cleanup:
 	sudo rm -rf $(FIREWALL_DIR)/logs
-	sudo rm -rf $(FIREWALL_DIR)/src/network_controller/logs
+	sudo rm -rf $(FIREWALL_DIR)/src/monitor/logs
