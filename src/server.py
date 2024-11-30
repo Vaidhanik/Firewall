@@ -113,6 +113,7 @@ def search_apps():
             'error': f"Search failed: {str(e)}"
         }), 500
 
+
 @app.route('/block', methods=['POST'])
 def block_app():
     """Block application from accessing target"""
@@ -127,43 +128,106 @@ def block_app():
                 'error': 'No JSON data provided'
             }), 400
             
-        app_name = data.get('app')
-        target = data.get('target')
+        # Step 1: Handle search request
+        if 'search' in data:
+            search_term = data.get('search')
+            if not search_term:
+                return jsonify({
+                    'success': False,
+                    'error': 'No search term provided'
+                }), 400
+                
+            # Get matching applications
+            matches = controller.search_installed_apps(search_term)
+            
+            if not matches:
+                return jsonify({
+                    'success': False,
+                    'error': f"No applications found matching '{search_term}'",
+                    'matches': []
+                }), 404
+            
+            # Get full paths for applications using 'which'
+            numbered_matches = []
+            for i, app in enumerate(matches, 1):
+                try:
+                    # Get the full path
+                    result = subprocess.check_output(['which', app]).decode().strip()
+                    numbered_matches.append({
+                        'number': i,
+                        'name': app,
+                        'path': result
+                    })
+                except subprocess.CalledProcessError:
+                    # If which fails, still include the app but without path
+                    numbered_matches.append({
+                        'number': i,
+                        'name': app,
+                        'path': None
+                    })
+            
+            return jsonify({
+                'success': True,
+                'matches': numbered_matches
+            })
+            
+        # Step 2: Handle block request
+        app_number = data.get('selection')  # User's selection number
+        target = data.get('target')         # Target to block
+        matches = data.get('matches', [])   # List of matches from previous search
         
-        if not app_name or not target:
+        if not all([app_number, target, matches]):
             return jsonify({
                 'success': False,
-                'error': 'Missing app name or target'
+                'error': 'Missing required fields: selection, target, and matches'
             }), 400
-
-        # Validate app existence first
-        if app_name not in controller.installed_apps:
-            matches = controller.search_installed_apps(app_name)
-            error_msg = f"Application '{app_name}' not found"
-            if matches:
-                error_msg += f". Did you mean one of these? {', '.join(matches[:5])}"
+        
+        try:
+            app_number = int(app_number)
+            if app_number < 1 or app_number > len(matches):
+                return jsonify({
+                    'success': False,
+                    'error': f'Invalid selection. Please choose between 1 and {len(matches)}'
+                }), 400
+        except ValueError:
             return jsonify({
                 'success': False,
-                'error': error_msg,
-                'suggested_apps': matches[:5] if matches else []
+                'error': 'Selection must be a valid number'
             }), 400
-
-        # Try to block the app
-        success = controller.block_app_network(app_name, target)
+        
+        # Get selected app
+        selected_app = matches[app_number - 1]['name']
+        
+        # Verify we can find the application path
+        try:
+            app_path = subprocess.check_output(['which', selected_app]).decode().strip()
+            if not app_path:
+                raise subprocess.CalledProcessError(1, ['which', selected_app])
+        except subprocess.CalledProcessError:
+            return jsonify({
+                'success': False,
+                'error': f"Could not find system path for {selected_app}. Please ensure it's installed correctly."
+            }), 400
+            
+        # Log domain resolution attempt
+        logger.info(f"Resolving domain {target}...")
+        
+        # Try to block the app using the full path
+        success = controller.block_app_network(app_path, target)
         
         if not success:
-            logger.error(f"Failed to block {app_name} from accessing {target}")
+            logger.error(f"Failed to block {selected_app} from accessing {target}")
             return jsonify({
                 'success': False,
-                'error': f"Failed to block {app_name} from accessing {target}",
-                'app': app_name,
+                'error': f"Failed to block {selected_app} from accessing {target}",
+                'app': selected_app,
                 'target': target
             }), 400
 
-        logger.info(f"Successfully blocked {app_name} from accessing {target}")
+        logger.info(f"Successfully blocked {selected_app} from accessing {target}")
         return jsonify({
             'success': True,
-            'app': app_name,
+            'app': selected_app,
             'target': target
         })
         
@@ -173,7 +237,7 @@ def block_app():
         return jsonify({
             'success': False,
             'error': error_msg
-        }), 500
+        }), 500 
 
 @app.route('/unblock', methods=['POST'])
 def unblock_app():
