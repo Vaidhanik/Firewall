@@ -59,7 +59,7 @@ run-tracer:
 run-panel:
 	sudo rm -rf test/logs
 	sudo rm -rf logs
-	sudo $(FIREWALL_DIR)/test/.firewall/bin/python3 ./src/network_control.py
+	sudo $(FIREWALL_DIR)/test/.firewall/bin/python3 ./src/run_controller.py
 
 test-firewall:
 	$(FIREWALL_DIR)/test/.firewall/bin/python3 ./test/tester.py $(URLS)
