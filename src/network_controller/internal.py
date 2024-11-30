@@ -1,19 +1,19 @@
 import os
 import time
 import subprocess
-from typing import Dict, List
 from pathlib import Path
 from datetime import datetime
+from typing import Dict, List
+from monitor import MonitorFactory
 from interceptor import NetworkInterceptor
 from network_controller.proxy import ProxyInterceptor
-from network_controller.monitor import NetworkMonitor
 
 class InternalController:
     def __init__(self):
         """Initialize Internal Controller"""
         self.proxy = ProxyInterceptor()
-        self.monitor = NetworkMonitor()
         self.interceptor = NetworkInterceptor()
+        self.monitor = MonitorFactory().create_monitor()
 
         self.CACHE_TIMEOUT = 5  # Refresh cache every 5 seconds
         self.last_cache_update = 0
