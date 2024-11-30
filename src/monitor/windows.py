@@ -1,6 +1,5 @@
-import subprocess
-import socket
 import re
+import subprocess
 from typing import Dict, List, Optional
 from monitor.base import NetworkMonitorBase
 
