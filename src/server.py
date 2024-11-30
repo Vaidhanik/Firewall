@@ -3,7 +3,7 @@ import logging
 import traceback
 import subprocess
 from flask import Flask, request, jsonify
-from network_control import NetworkController
+from network_controller import NetworkController
 
 logging.basicConfig(
     level=logging.DEBUG,
