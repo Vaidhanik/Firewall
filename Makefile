@@ -53,12 +53,12 @@ block-app:
 		jq '.'
 
 run-tracer:
-	sudo rm -rf test/logs
-	sudo $(FIREWALL_DIR)/test/.firewall/bin/python3 ./test/monitor.py
+	sudo rm -rf src/network_controller/logs
+	sudo $(FIREWALL_DIR)/test/.firewall/bin/python3 ./src/network_controller/monitor.py
 
 run-panel:
-	sudo rm -rf test/logs
 	sudo rm -rf logs
+	sudo rm -rf src/network_controller/logs
 	sudo $(FIREWALL_DIR)/test/.firewall/bin/python3 ./src/run_controller.py
 
 test-firewall:
@@ -91,33 +91,6 @@ server-apps:
 
 server-rules:
 	curl http://localhost:5000/rules
-
-
-# server-search-app:
-# 	$(call check_vars,$(APP),APP,search-app)
-# 	@echo "$(YELLOW)Searching for applications matching '$(APP)'...$(NC)"
-# 	@curl -s "$(API_URL)/search?q=$(APP)" | jq '.' || echo "Failed to parse JSON response"
-# 	@echo ""
-
-# server-block:
-# 	$(call check_vars,$(APP),APP,block)
-# 	$(call check_vars,$(TARGET),TARGET,block)
-# 	@echo "$(YELLOW)Attempting to block $(APP) from accessing $(TARGET)...$(NC)"
-# 	@curl -s -X POST $(API_URL)/block \
-# 		-H "Content-Type: application/json" \
-# 		-d '{"app":"$(APP)","target":"$(TARGET)"}' | \
-# 		jq '.' || echo "Failed to parse JSON response"
-# 	@echo ""
-
-# confirm-block:
-# 	$(call check_vars,$(APP),APP,confirm-block)
-# 	$(call check_vars,$(TARGET),TARGET,confirm-block)
-# 	@echo "$(YELLOW)Blocking exact application '$(APP)' from accessing '$(TARGET)'...$(NC)"
-# 	@curl -s -X POST $(API_URL)/block \
-# 		-H "Content-Type: application/json" \
-# 		-d '{"app":"$(APP)","target":"$(TARGET)"}' | \
-# 		jq '.' || echo "Failed to parse JSON response"
-# 	@echo ""
 
 # test-block:
 # 	@echo "$(YELLOW)Running block endpoint tests...$(NC)"
@@ -161,5 +134,5 @@ fw-linux-rm:
 # Cleanup
 
 cleanup:
-	sudo rm -rf $(FIREWALL_DIR)/src/logs
 	sudo rm -rf $(FIREWALL_DIR)/logs
+	sudo rm -rf $(FIREWALL_DIR)/src/network_controller/logs
