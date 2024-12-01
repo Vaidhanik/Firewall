@@ -4,3 +4,5 @@ target/
 intercep*.db
 __pycache__/
 *.pyc
+vaidhanik/
+.search*
