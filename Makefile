@@ -27,21 +27,42 @@ check_vars = @if [ -z "$(1)" ]; then \
     exit 1; \
 fi
 
-# Store matches in a temporary file
-MATCHES_FILE := .matches.tmp
+#================================================================#
+#=============================SERVER=============================#
+#================================================================#
 
+TEMP_FILE := .search_results.tmp
+
+start:
+	rm -rf src/vaidhanik
+	mkdir -p src/vaidhanik
+	sudo $(FIREWALL_DIR)/test/.firewall/bin/python3 ./src/server.py
+
+stop:
+	@echo "$(YELLOW)Stopping server...$(NC)"
+	@sudo pkill -f "python3 ./src/server.py" || true
+	@echo "$(GREEN)Server stopped$(NC)"
+
+cleanup-rules:
+	@echo "$(YELLOW)Cleaning up firewall rules and saving state...$(NC)"
+	@curl -s -X POST $(API_URL)/cleanup | jq '.'
+	@make stop
+
+# Two-step blocking process
 search-app:
-	$(call check_var,$(SEARCH_TERM),SEARCH_TERM,search-app)
+	$(call check_vars,$(SEARCH_TERM),SEARCH_TERM,search-app)
 	@echo "$(YELLOW)Searching for applications matching '$(SEARCH_TERM)'...$(NC)"
 	@curl -s -X POST $(API_URL)/block \
 		-H "Content-Type: application/json" \
 		-d '{"search":"$(SEARCH_TERM)"}' | tee $(TEMP_FILE) | jq '.'
-	@echo "\n$(GREEN)To block an app, use:$(NC)"
-	@echo "make block-app APP_NUMBER=<number> TARGET=<domain/ip>"
+	@if [ $$? -eq 0 ] && [ -f $(TEMP_FILE) ]; then \
+		echo "\n$(GREEN)To block an app, use:$(NC)"; \
+		echo "make block-app APP_NUMBER=<number> TARGET=<domain/ip>"; \
+	fi
 
 block-app:
-	$(call check_var,$(APP_NUMBER),APP_NUMBER,block-app)
-	$(call check_var,$(TARGET),TARGET,block-app)
+	$(call check_vars,$(APP_NUMBER),APP_NUMBER,block-app)
+	$(call check_vars,$(TARGET),TARGET,block-app)
 	@if [ ! -f $(TEMP_FILE) ]; then \
 		echo "$(RED)Error: Please run 'make search-app SEARCH_TERM=<name>' first$(NC)"; \
 		exit 1; \
@@ -51,6 +72,35 @@ block-app:
 		-H "Content-Type: application/json" \
 		-d "{\"selection\":$(APP_NUMBER),\"target\":\"$(TARGET)\",\"matches\":$$(cat $(TEMP_FILE) | jq '.matches')}" | \
 		jq '.'
+
+# Example usage targets
+example-block:
+	@echo "$(YELLOW)Example: Blocking Firefox from accessing x.com$(NC)"
+	@echo "\n1. First, search for Firefox:"
+	@make search-app SEARCH_TERM=firefox
+	@echo "\n2. Then block it (assuming Firefox is match #1):"
+	@make block-app APP_NUMBER=1 TARGET=x.com
+
+list-rules:
+	@echo "$(YELLOW)Getting current blocking rules...$(NC)"
+	@curl -s -X POST $(API_URL)/unblock \
+		-H "Content-Type: application/json" \
+		-d '{"action":"list"}' | jq '.'
+
+unblock-rule:
+	$(call check_vars,$(RULE_ID),RULE_ID,unblock-rule)
+	@echo "$(YELLOW)Unblocking rule $(RULE_ID)...$(NC)"
+	@curl -s -X POST $(API_URL)/unblock \
+		-H "Content-Type: application/json" \
+		-d '{"rule_id":$(RULE_ID)}' | jq '.'
+
+clean:
+	@rm -f $(TEMP_FILE)
+	@echo "$(GREEN)Cleaned up temporary files$(NC)"
+
+#================================================================#
+#=======================NETWORK_CONTROLLER=======================#
+#================================================================#
 
 run-tracer:
 # sudo rm -rf src/network_controller/logs
@@ -94,34 +144,9 @@ server-apps:
 server-rules:
 	curl http://localhost:5000/rules
 
-# test-block:
-# 	@echo "$(YELLOW)Running block endpoint tests...$(NC)"
-	
-# 	@echo "\n1. Testing with missing app name..."
-# 	@curl -s -X POST $(API_URL)/block \
-# 		-H "Content-Type: application/json" \
-# 		-d '{"target":"x.com"}' | jq '.'
-	
-# 	@echo "\n2. Testing with missing target..."
-# 	@curl -s -X POST $(API_URL)/block \
-# 		-H "Content-Type: application/json" \
-# 		-d '{"app":"firefox"}' | jq '.'
-	
-# 	@echo "\n3. Testing with partial app name..."
-# 	@curl -s -X POST $(API_URL)/block \
-# 		-H "Content-Type: application/json" \
-# 		-d '{"app":"fire","target":"x.com"}' | jq '.'
-	
-# 	@echo "\n4. Testing with non-existent app..."
-# 	@curl -s -X POST $(API_URL)/block \
-# 		-H "Content-Type: application/json" \
-# 		-d '{"app":"nonexistentapp","target":"x.com"}' | jq '.'
-	
-# 	@echo "\n$(GREEN)Tests completed$(NC)"
-
-#====================================================================================#
-
-# Firewall
+#================================================================#
+#============================Firewall============================#
+#================================================================#
 
 fw-linux-d:
 	sudo iptables -L OUTPUT -n
@@ -137,9 +162,9 @@ fw-win-d:
 fw-win-rm:
 	netsh advfirewall firewall delete rule name=APP_*
 
-#====================================================================================#
-
-# Cleanup
+#=================================================================#
+#=============================Cleanup=============================#
+#=================================================================#
 
 cleanup:
 	sudo rm -rf $(FIREWALL_DIR)/logs
