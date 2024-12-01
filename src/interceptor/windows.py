@@ -62,7 +62,175 @@ class WindowsInterceptor(BaseInterceptor):
             self.logger.error(f"Failed to get process SID: {e}")
             return None
         
+    # def _get_app_path(self, app_name: str) -> str:
+    #     """
+    #     Get full path for any application using multiple resolution methods
+    #     """
+    #     try:
+    #         # Method 1: Check if it's already a full path
+    #         if os.path.exists(app_name):
+    #             return os.path.abspath(app_name)
     
+    #         # Method 2: Try Windows API path resolution
+    #         try:
+    #             return win32api.GetLongPathName(app_name)
+    #         except:
+    #             pass
+            
+    #         # Method 3: Check Program Files directories
+    #         program_dirs = [
+    #             os.environ.get('PROGRAMFILES', 'C:\\Program Files'),
+    #             os.environ.get('PROGRAMFILES(X86)', 'C:\\Program Files (x86)'),
+    #             os.environ.get('LOCALAPPDATA'),
+    #             os.environ.get('APPDATA')
+    #         ]
+    
+    #         # Get the base name without extension
+    #         base_name = os.path.splitext(os.path.basename(app_name))[0]
+    
+    #         # Search in program directories recursively
+    #         for program_dir in program_dirs:
+    #             if program_dir:
+    #                 for root, dirs, files in os.walk(program_dir):
+    #                     for file in files:
+    #                         if file.lower() == f"{base_name}.exe".lower():
+    #                             return os.path.join(root, file)
+    
+    #         # Method 4: Try Windows 'where' command (checks PATH)
+    #         try:
+    #             path = subprocess.check_output(['where', app_name], 
+    #                                          universal_newlines=True).strip().split('\n')[0]
+    #             if os.path.exists(path):
+    #                 return path
+    #         except:
+    #             pass
+            
+    #         # Method 5: Check Windows Registry for installed applications
+    #         try:
+    #             import winreg
+    #             sub_key = f"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\{base_name}.exe"
+                
+    #             # Try both HKLM and HKCU
+    #             for hkey in [winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER]:
+    #                 try:
+    #                     with winreg.OpenKey(hkey, sub_key) as key:
+    #                         path = winreg.QueryValue(key, None)
+    #                         if os.path.exists(path):
+    #                             return path
+    #                 except:
+    #                     continue
+    #         except:
+    #             pass
+            
+    #         self.logger.error(f"Could not find path for {app_name}")
+    #         return None
+    
+    #     except Exception as e:
+    #         self.logger.error(f"Error resolving app path: {e}")
+    #         return None
+    
+    def _get_app_path(self, app_name: str) -> str:
+        """
+        Get full path for any application using multiple resolution methods
+        """
+        try:
+            # Normalize the app name
+            app_name_lower = app_name.lower()
+
+            # Method 1: Check if it's already a full path
+            if os.path.exists(app_name):
+                return os.path.abspath(app_name)
+
+            # Method 2: Special handling for Chrome-based browsers
+            if any(browser in app_name_lower for browser in ['chrome', 'brave']):
+                program_dirs = [
+                    os.environ.get('PROGRAMFILES', 'C:\\Program Files'),
+                    os.environ.get('PROGRAMFILES(X86)', 'C:\\Program Files (x86)'),
+                    os.environ.get('LOCALAPPDATA')
+                ]
+
+                # Known possible paths for Chrome and Brave
+                chrome_paths = {
+                    'chrome': [
+                        'Google\\Chrome\\Application\\chrome.exe',
+                        'Google\\Chrome Beta\\Application\\chrome.exe',
+                        'Google\\Chrome Dev\\Application\\chrome.exe',
+                        'Google\\Chrome Canary\\Application\\chrome.exe'
+                    ]
+                }
+
+                # Determine which paths to check
+                check_paths = []
+                if 'chrome' in app_name_lower:
+                    check_paths = chrome_paths['chrome']
+                elif 'brave' in app_name_lower:
+                    check_paths = chrome_paths['brave']
+
+                # Check each possible location
+                for program_dir in program_dirs:
+                    if program_dir:
+                        for relative_path in check_paths:
+                            full_path = os.path.join(program_dir, relative_path)
+                            if os.path.exists(full_path):
+                                return full_path
+
+                # Try registry for Chrome-based browsers
+                try:
+                    import winreg
+                    # Registry paths to check
+                    registry_paths = []
+                    if 'chrome' in app_name_lower:
+                        registry_paths = [
+                            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe"),
+                            (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe")
+                        ]
+                    elif 'brave' in app_name_lower:
+                        registry_paths = [
+                            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\brave.exe"),
+                            (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\brave.exe")
+                        ]
+
+                    for hkey, sub_key in registry_paths:
+                        try:
+                            with winreg.OpenKey(hkey, sub_key) as key:
+                                path = winreg.QueryValue(key, None)
+                                if os.path.exists(path):
+                                    return path
+                        except:
+                            continue
+                except:
+                    pass
+
+            # Method 3: Try 'where' command (checks PATH)
+            try:
+                path = subprocess.check_output(['where', app_name], 
+                                             universal_newlines=True).strip().split('\n')[0]
+                if os.path.exists(path):
+                    return path
+            except:
+                pass
+
+            # Method 4: Search Program Files recursively as last resort
+            program_dirs = [
+                os.environ.get('PROGRAMFILES', 'C:\\Program Files'),
+                os.environ.get('PROGRAMFILES(X86)', 'C:\\Program Files (x86)'),
+                os.environ.get('LOCALAPPDATA'),
+                os.environ.get('APPDATA')
+            ]
+
+            base_name = f"{os.path.splitext(os.path.basename(app_name))[0]}.exe"
+            for program_dir in program_dirs:
+                if program_dir:
+                    for root, dirs, files in os.walk(program_dir):
+                        if base_name.lower() in (f.lower() for f in files):
+                            return os.path.join(root, base_name)
+
+            self.logger.error(f"Could not find path for {app_name}")
+            return None
+
+        except Exception as e:
+            self.logger.error(f"Error resolving app path: {e}")
+            return None
     def _create_windows_rules(self, app_path: str, target_ip: str, action: str = 'add') -> bool:
         """Create Windows Firewall rules for both TCP and UDP"""
         try:
