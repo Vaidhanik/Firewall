@@ -5,18 +5,21 @@ import subprocess
 from flask import Flask, request, jsonify
 from network_controller import NetworkController
 
+os.makedirs('src/vaidhanik', exist_ok=True)
+
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler('/app/logs/app.log')
+        logging.FileHandler('src/vaidhanik/vaidhanik.log')
     ]
 )
 logger = logging.getLogger(__name__)
+
 # Ensure log directory exists with proper permissions
-os.makedirs('/app/logs', exist_ok=True)
-os.chmod('/app/logs', 0o777)
+# os.makedirs('/app_logs', exist_ok=True)
+# os.chmod('/app_logs', 0o777)
 
 app = Flask(__name__)
 controller = NetworkController()
@@ -116,7 +119,39 @@ def search_apps():
 
 @app.route('/block', methods=['POST'])
 def block_app():
-    """Block application from accessing target"""
+    """
+    Block application from accessing target. The endpoint handles two steps:
+    1. Search step: Search for applications matching a keyword
+    2. Block step: Block selected application from accessing target
+    
+    Request format for search:
+    {
+        "search": "firefox"  # Search term
+    }
+    
+    Response format for search:
+    {
+        "success": true,
+        "matches": [
+            {
+                "number": 1,
+                "name": "firefox"
+            }
+        ]
+    }
+    
+    Request format for block:
+    {
+        "selection": 1,        # Selected application number from search results
+        "target": "x.com",     # Target domain/IP to block
+        "matches": [           # Original matches array from search step
+            {
+                "number": 1,
+                "name": "firefox"
+            }
+        ]
+    }
+    """
     try:
         # Log incoming request
         logger.debug(f"Received block request: {request.get_json()}")
@@ -137,7 +172,7 @@ def block_app():
                     'error': 'No search term provided'
                 }), 400
                 
-            # Get matching applications
+            # Use existing search_installed_apps method
             matches = controller.search_installed_apps(search_term)
             
             if not matches:
@@ -147,24 +182,14 @@ def block_app():
                     'matches': []
                 }), 404
             
-            # Get full paths for applications using 'which'
-            numbered_matches = []
-            for i, app in enumerate(matches, 1):
-                try:
-                    # Get the full path
-                    result = subprocess.check_output(['which', app]).decode().strip()
-                    numbered_matches.append({
-                        'number': i,
-                        'name': app,
-                        'path': result
-                    })
-                except subprocess.CalledProcessError:
-                    # If which fails, still include the app but without path
-                    numbered_matches.append({
-                        'number': i,
-                        'name': app,
-                        'path': None
-                    })
+            # Format matches with numbers
+            numbered_matches = [
+                {
+                    'number': i + 1,
+                    'name': app
+                }
+                for i, app in enumerate(matches)
+            ]
             
             return jsonify({
                 'success': True,
@@ -195,25 +220,14 @@ def block_app():
                 'error': 'Selection must be a valid number'
             }), 400
         
-        # Get selected app
+        # Get selected app name
         selected_app = matches[app_number - 1]['name']
-        
-        # Verify we can find the application path
-        try:
-            app_path = subprocess.check_output(['which', selected_app]).decode().strip()
-            if not app_path:
-                raise subprocess.CalledProcessError(1, ['which', selected_app])
-        except subprocess.CalledProcessError:
-            return jsonify({
-                'success': False,
-                'error': f"Could not find system path for {selected_app}. Please ensure it's installed correctly."
-            }), 400
             
         # Log domain resolution attempt
         logger.info(f"Resolving domain {target}...")
         
-        # Try to block the app using the full path
-        success = controller.block_app_network(app_path, target)
+        # Try to block the app using the controller's block_app_network method
+        success = controller.block_app_network(selected_app, target)
         
         if not success:
             logger.error(f"Failed to block {selected_app} from accessing {target}")
@@ -237,15 +251,35 @@ def block_app():
         return jsonify({
             'success': False,
             'error': error_msg
-        }), 500 
-
+        }), 500
+    
 @app.route('/unblock', methods=['POST'])
 def unblock_app():
     """Remove blocking rule"""
     try:
         data = request.get_json()
+        if not data:
+            return jsonify({
+                'success': False,
+                'error': 'No JSON data provided'
+            }), 400
+
+        # Step 1: List current rules
+        if data.get('action') == 'list':
+            rules = controller.get_active_blocks()
+            if not rules:
+                return jsonify({
+                    'success': False,
+                    'error': 'No active blocking rules found'
+                }), 404
+                
+            return jsonify({
+                'success': True,
+                'rules': rules  # Already contains rule IDs from controller
+            })
+
+        # Step 2: Unblock rule
         rule_id = data.get('rule_id')
-        
         if not rule_id:
             return jsonify({
                 'success': False,
@@ -267,6 +301,7 @@ def unblock_app():
             'success': True,
             'rule_id': rule_id
         })
+        
     except Exception as e:
         error_msg = f"Failed to unblock rule: {str(e)}"
         logger.error(f"{error_msg}\n{traceback.format_exc()}")
@@ -377,6 +412,26 @@ def get_logs():
         return jsonify({
             'success': False,
             'error': f"Failed to get logs: {str(e)}"
+        }), 500
+    
+@app.route('/cleanup', methods=['POST'])
+def cleanup():
+    """Cleanup firewall rules and save final state"""
+    try:
+        # Call controller's cleanup method
+        controller.cleanup()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Successfully cleaned up firewall rules and saved state'
+        })
+        
+    except Exception as e:
+        error_msg = f"Failed to cleanup: {str(e)}"
+        logger.error(f"{error_msg}\n{traceback.format_exc()}")
+        return jsonify({
+            'success': False,
+            'error': error_msg
         }), 500
 
 def main():
