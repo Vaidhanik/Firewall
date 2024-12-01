@@ -11,6 +11,9 @@ services:
       # - /sys:/sys:ro
       # - /proc:/proc:ro
       - ./src/server.py:/app/server.py
+      - ./src/run_tracer.py:/app/run_tracer.py
+      - ./src/run_controller.py:/app/run_controller.py
+      - ./src/monitor/:/app/monitor/
       - ./src/interceptor/:/app/interceptor/
       - ./src/requirements.txt:/app/requirements.txt
       - ./src/network_controller/:/app/network_controller/
