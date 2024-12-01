@@ -1,3 +1,4 @@
+import sys
 import json
 import time
 import multiprocessing
@@ -150,6 +151,10 @@ class NetworkController:
     def _run_monitor_process(self, running_flag, stats_dict):
         """Running monitoring in separate process"""
         try:
+            # Set process start method for windows
+            if sys.platform == 'win32':
+                multiprocessing.freeze_support()
+
             # Create logs directory if it doesn't exist
             log_file = self.logs_dir / 'monitor.log'
             self.logs_dir.mkdir(exist_ok=True)
