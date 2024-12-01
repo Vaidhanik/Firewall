@@ -1,4 +1,5 @@
 import os
+import ctypes
 import subprocess
 import win32api
 import win32con
@@ -61,72 +62,6 @@ class WindowsInterceptor(BaseInterceptor):
             self.logger.error(f"Failed to get process SID: {e}")
             return None
         
-    def _get_app_path(self, app_name: str) -> str:
-        """
-        Get full path for any application using multiple resolution methods
-        """
-        try:
-            # Method 1: Check if it's already a full path
-            if os.path.exists(app_name):
-                return os.path.abspath(app_name)
-    
-            # Method 2: Try Windows API path resolution
-            try:
-                return win32api.GetLongPathName(app_name)
-            except:
-                pass
-            
-            # Method 3: Check Program Files directories
-            program_dirs = [
-                os.environ.get('PROGRAMFILES', 'C:\\Program Files'),
-                os.environ.get('PROGRAMFILES(X86)', 'C:\\Program Files (x86)'),
-                os.environ.get('LOCALAPPDATA'),
-                os.environ.get('APPDATA')
-            ]
-    
-            # Get the base name without extension
-            base_name = os.path.splitext(os.path.basename(app_name))[0]
-    
-            # Search in program directories recursively
-            for program_dir in program_dirs:
-                if program_dir:
-                    for root, dirs, files in os.walk(program_dir):
-                        for file in files:
-                            if file.lower() == f"{base_name}.exe".lower():
-                                return os.path.join(root, file)
-    
-            # Method 4: Try Windows 'where' command (checks PATH)
-            try:
-                path = subprocess.check_output(['where', app_name], 
-                                             universal_newlines=True).strip().split('\n')[0]
-                if os.path.exists(path):
-                    return path
-            except:
-                pass
-            
-            # Method 5: Check Windows Registry for installed applications
-            try:
-                import winreg
-                sub_key = f"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\{base_name}.exe"
-                
-                # Try both HKLM and HKCU
-                for hkey in [winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER]:
-                    try:
-                        with winreg.OpenKey(hkey, sub_key) as key:
-                            path = winreg.QueryValue(key, None)
-                            if os.path.exists(path):
-                                return path
-                    except:
-                        continue
-            except:
-                pass
-            
-            self.logger.error(f"Could not find path for {app_name}")
-            return None
-    
-        except Exception as e:
-            self.logger.error(f"Error resolving app path: {e}")
-            return None
     
     def _create_windows_rules(self, app_path: str, target_ip: str, action: str = 'add') -> bool:
         """Create Windows Firewall rules for both TCP and UDP"""
@@ -136,58 +71,127 @@ class WindowsInterceptor(BaseInterceptor):
             if not resolved_path:
                 self.logger.error(f"Could not find path for {app_path}")
                 return False
-                
+
             process_name = os.path.basename(resolved_path)
-            
+
             # Get user SID for rule targeting
             user_sid = self._get_process_sid()
             if not user_sid:
                 return False
-                
+
             rule_base_name = self._create_rule_name(process_name, target_ip)
-            
+
             if action == 'add':
                 # Create rules for TCP, UDP
                 protocols = ['TCP', 'UDP']
                 for protocol in protocols:
                     rule_name = f"{rule_base_name}_{protocol}"
-                    cmd = [
-                        'netsh', 'advfirewall', 'firewall', 'add', 'rule',
-                        f'name={rule_name}',
-                        'dir=out',
-                        'action=block',
-                        'enable=yes',
-                        f'program="{resolved_path}"',  # Add quotes around path
-                        f'protocol={protocol}',
-                        f'remoteip={target_ip}'
+
+                    # Create powershell command to add rule (handles permissions better)
+                    ps_cmd = [
+                        'powershell', '-Command',
+                        f'New-NetFirewallRule',
+                        f'-DisplayName "{rule_name}"',
+                        f'-Name "{rule_name}"',
+                        '-Direction Outbound',
+                        '-Action Block',
+                        '-Enabled True',
+                        f'-Program "{resolved_path}"',
+                        f'-Protocol {protocol}',
+                        f'-RemoteAddress {target_ip}',
+                        '-Profile Private,Public,Domain'
                     ]
-                    
-                    subprocess.run(cmd, check=True)
-                    self.logger.info(f"Added {protocol} rule: {rule_name}")
-                    
+
+                    self.logger.info(f"Executing command: {' '.join(ps_cmd)}")
+
+                    # Run with elevated privileges if possible
+                    try:
+                        if os.name == 'nt':  # On Windows
+                            import ctypes
+                            if ctypes.windll.shell32.IsUserAnAdmin() == 0:
+                                self.logger.warning("Not running with admin privileges. Rules may not be created.")
+
+                        process = subprocess.run(
+                            ps_cmd,
+                            capture_output=True,
+                            text=True,
+                            creationflags=subprocess.CREATE_NO_WINDOW
+                        )
+
+                        if process.returncode != 0:
+                            error_msg = process.stderr or "No error message available"
+                            self.logger.error(f"Command failed with output: {error_msg}")
+                            # Try alternative method with netsh if powershell fails
+                            netsh_cmd = [
+                                'netsh', 'advfirewall', 'firewall', 'add', 'rule',
+                                f'name="{rule_name}"',
+                                'dir=out',
+                                'action=block',
+                                'enable=yes',
+                                f'program="{resolved_path}"',
+                                f'protocol={protocol}',
+                                f'remoteip={target_ip}',
+                                'profile=private,public,domain'
+                            ]
+
+                            self.logger.info("Trying alternative method with netsh...")
+                            process = subprocess.run(
+                                netsh_cmd,
+                                capture_output=True,
+                                text=True,
+                                creationflags=subprocess.CREATE_NO_WINDOW
+                            )
+
+                            if process.returncode != 0:
+                                self.logger.error(f"Both methods failed. Last error: {process.stderr}")
+                                return False
+
+                        self.logger.info(f"Added {protocol} rule: {rule_name}")
+
+                    except Exception as e:
+                        self.logger.error(f"Error executing command: {e}")
+                        return False
+
                 return True
-                
+
             else:  # Remove rules
-                # Get existing rules
-                rules = self._get_app_rules(process_name)
-                matching_rules = [r for r in rules if target_ip in r]
-                
-                for rule_name in matching_rules:
-                    cmd = [
-                        'netsh', 'advfirewall', 'firewall', 'delete', 'rule',
-                        f'name={rule_name}'
+                try:
+                    # Use PowerShell for removal
+                    ps_cmd = [
+                        'powershell', '-Command',
+                        f'Get-NetFirewallRule -DisplayName "APP_{process_name}_BLOCK*" | Remove-NetFirewallRule'
                     ]
-                    subprocess.run(cmd, check=True)
-                    self.logger.info(f"Removed rule: {rule_name}")
-                    
-                return True
-                
-        except subprocess.CalledProcessError as e:
-            self.logger.error(f"Failed to {'add' if action == 'add' else 'remove'} firewall rules: {e}")
-            return False
+
+                    subprocess.run(ps_cmd, check=False, capture_output=True, text=True)
+
+                    # Also try netsh removal as backup
+                    rules = self._get_app_rules(process_name)
+                    matching_rules = [r for r in rules if target_ip in r]
+
+                    for rule_name in matching_rules:
+                        cmd = [
+                            'netsh', 'advfirewall', 'firewall', 'delete', 'rule',
+                            f'name="{rule_name}"'
+                        ]
+                        subprocess.run(cmd, check=False, capture_output=True, text=True)
+
+                    self.logger.info(f"Removed rules for {process_name}")
+                    return True
+
+                except Exception as e:
+                    self.logger.error(f"Error removing rules: {e}")
+                    return False
+
         except Exception as e:
             self.logger.error(f"Error in create_windows_rules: {e}")
             return False
+
+    def _check_admin_privileges(self) -> bool:
+        """Check if running with administrator privileges"""
+        try:
+            return ctypes.windll.shell32.IsUserAnAdmin() != 0
+        except:
+            return False    
         
     def add_blocking_rule(self, app_name: str, target: str) -> bool:
         """Add new blocking rule"""
