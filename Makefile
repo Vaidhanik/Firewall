@@ -131,6 +131,12 @@ fw-linux-rm:
 	sudo iptables -F
 	sudo iptables -X
 
+fw-win-d:
+	netsh advfirewall firewall show rule name=APP_* verbose
+
+fw-win-rm:
+	netsh advfirewall firewall delete rule name=APP_*
+
 #====================================================================================#
 
 # Cleanup
