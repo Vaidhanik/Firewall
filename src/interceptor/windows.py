@@ -1,12 +1,13 @@
 import os
+import sys
 import ctypes
 import subprocess
-import win32api
-import win32con
-import win32security
-import win32com.client
-from pathlib import Path
-from typing import Optional, List, Dict
+if sys.platform == 'win32':
+    import win32api
+    import win32con
+    import win32security
+    import win32com.client
+from typing import List
 from .base import BaseInterceptor
 
 class WindowsInterceptor(BaseInterceptor):
