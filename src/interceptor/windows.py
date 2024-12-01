@@ -89,6 +89,9 @@ class WindowsInterceptor(BaseInterceptor):
                         'Google\\Chrome Beta\\Application\\chrome.exe',
                         'Google\\Chrome Dev\\Application\\chrome.exe',
                         'Google\\Chrome Canary\\Application\\chrome.exe'
+                    ],
+                    'brave': [
+                        'BraveSoftware\\Brave-Browser\\Application\\brave.exe'
                     ]
                 }
 
