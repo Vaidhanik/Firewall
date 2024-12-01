@@ -94,6 +94,15 @@ unblock-rule:
 		-H "Content-Type: application/json" \
 		-d '{"rule_id":$(RULE_ID)}' | jq '.'
 
+server-health:
+	curl http://localhost:5000/health
+
+server-apps:
+	curl http://localhost:5000/apps
+
+server-rules:
+	curl http://localhost:5000/rules
+
 clean:
 	@rm -f $(TEMP_FILE)
 	@echo "$(GREEN)Cleaned up temporary files$(NC)"
@@ -133,16 +142,6 @@ clogs:
 
 down:
 	sudo docker compose down
-
-# SERVER
-server-health:
-	curl http://localhost:5000/health
-
-server-apps:
-	curl http://localhost:5000/apps
-
-server-rules:
-	curl http://localhost:5000/rules
 
 #================================================================#
 #============================Firewall============================#
