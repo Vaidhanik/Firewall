@@ -85,3 +85,13 @@ class BaseInterceptor(ABC):
     def get_process_info(self, pid: str) -> dict:
         """Cleanup all rules - must be implemented by platform-specific classes"""
         pass
+
+    @abstractmethod
+    def block_country(self, app_name: str, country_code: str) -> bool:
+        """Block a country for an application"""
+        pass
+
+    @abstractmethod
+    def unblock_country(self, app_name: str, country_code: str) -> bool:
+        """Unblock a country for an application"""
+        pass
