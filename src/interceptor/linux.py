@@ -1,13 +1,22 @@
 import os
 import subprocess
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Tuple
+
 from .base import BaseInterceptor
+from .geo_blocker.geo import GeoBlockManager
+from .geo_blocker.blocker import LinuxGeoBlocker
 
 class LinuxInterceptor(BaseInterceptor):
     def __init__(self):
         super().__init__()
         self.cgroup_base = Path("/sys/fs/cgroup/net_cls")
+        self.geo_manager = GeoBlockManager()
+        self.geo_blocker = LinuxGeoBlocker()
+
+    # ============================== #
+    # ===========FIREWALL=========== #
+    # ============================== #
         
     def _setup_cgroup_for_app(self, app_name: str) -> Optional[int]:
         """Setup cgroup for application and return classid"""
@@ -501,3 +510,49 @@ class LinuxInterceptor(BaseInterceptor):
             return self._create_linux_rules(app_path, target_ip, 'ipv6', action)
         else:  # IPv4
             return self._create_linux_rules(app_path, target_ip, 'ipv4', action)
+
+    # =============================== #
+    # ==========GEO-BLOCKER========== #
+    # =============================== #
+
+    def block_country(self, app_name: str, country_code: str) -> bool:
+        """Block a country for an application"""
+        try:
+            # Add to database first
+            block_id = self.db.add_country_block(app_name, country_code)
+            if not block_id:
+                return False
+                
+            # Apply firewall rules
+            if self.geo_blocker.add_country_block(app_name, country_code):
+                self.logger.info(f"Successfully blocked country {country_code} for {app_name}")
+                return True
+                
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Error blocking country: {e}")
+            return False
+        
+    def unblock_country(self, app_name: str, country_code: str) -> bool:
+        """Unblock a country for an application"""
+        try:
+            # Remove firewall rules
+            if self.geo_blocker.remove_country_block(app_name, country_code):
+                # Update database
+                if self.db.remove_country_block(app_name, country_code):
+                    self.logger.info(f"Successfully unblocked country {country_code} for {app_name}")
+                    return True
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Error unblocking country: {e}")
+            return False
+        
+    def get_blocked_countries(self) -> List[Tuple]:
+        """Get all active country blocks"""
+        return self.db.get_active_country_blocks()
+        
+    def cleanup_country_blocks(self):
+        """Clean up all country blocks"""
+        self.geo_blocker.cleanup_country_ipsets()
