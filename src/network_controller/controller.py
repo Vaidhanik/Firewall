@@ -4,14 +4,13 @@ import time
 import multiprocessing
 from pathlib import Path
 from datetime import datetime
+from typing import Dict, List, Optional, Tuple
 
 from monitor import MonitorFactory
 from interceptor import NetworkInterceptor
 from network_controller.proxy import ProxyInterceptor
 from network_controller.system import get_installed_apps
 from network_controller.internal import InternalController
-
-from typing import Dict, List, Optional, Tuple
 
 class NetworkController:
     def __init__(self):
@@ -459,6 +458,36 @@ class NetworkController:
     def get_active_blocks(self) -> List[Dict]:
         """Enhanced cleanup with better error handling"""
         return self.internal.get_active_blocks()
+
+    def block_country(self, app_name: str, country_code: str) -> bool:
+        """Block a country for an application"""
+        # Validate app existence first
+        if app_name not in self.installed_apps:
+            print(f"Warning: Application '{app_name}' not found in installed apps")
+            matching_apps = self.search_installed_apps(app_name)
+            if matching_apps:
+                print("\nDid you mean one of these?")
+                for i, app in enumerate(matching_apps[:5], 1):
+                    print(f"{i}. {app}")
+            return False
+    
+        if self.interceptor.block_country(app_name, country_code):
+            self.internal.last_cache_update = 0
+            self.logger.info(f"Successfully blocked country {country_code} for {app_name}")
+            return True
+        return False
+    
+    def unblock_country(self, app_name: str, country_code: str) -> bool:
+        """Unblock a country for an application"""
+        if self.interceptor.unblock_country(app_name, country_code):
+            self.internal.last_cache_update = 0
+            self.logger.info(f"Successfully unblocked country {country_code} for {app_name}")
+            return True
+        return False
+    
+    def get_blocked_countries(self) -> List[Dict]:
+        """Get list of all country blocks"""
+        return self.interceptor.get_blocked_countries()
     
     def cleanup(self):
         """Enhanced cleanup with better error handling"""
@@ -469,12 +498,13 @@ class NetworkController:
             # Stop proxy
             if self.internal.proxy_running:
                 self.internal.stop_proxy()
-                
+
             # Save controller state
             final_state = {
                 'timestamp': datetime.now().isoformat(),
                 'statistics': self.internal.get_statistics(),
                 'active_rules': self.get_active_blocks(),
+                'country_blocks': self.get_blocked_countries(),  # Add country blocks to state
                 'app_states': {
                     app: {
                         **state,
@@ -483,15 +513,16 @@ class NetworkController:
                     for app, state in self.internal.app_states.items()
                 }
             }
-            
+
             state_file = self.logs_dir / 'controller_state.json'
             with open(state_file, 'w') as f:
                 json.dump(final_state, f, indent=2)
-                
+
             print(f"\nController state saved to: {state_file}")
-            
+
             # Cleanup interceptor rules if needed
             if hasattr(self, 'interceptor'):
+                # Clean up regular blocking rules
                 active_blocks = self.get_active_blocks()
                 if active_blocks:
                     print("\nCleaning up firewall rules...")
@@ -500,7 +531,24 @@ class NetworkController:
                             self.unblock_app_network(block['id'])
                         except:
                             print(f"Failed to remove rule for {block['app']} -> {block['target']}")
-                            
+
+                # Clean up country blocks
+                country_blocks = self.get_blocked_countries()
+                if country_blocks:
+                    print("\nCleaning up country blocks...")
+                    for block in country_blocks:
+                        try:
+                            self.unblock_country(block['app_name'], block['country_code'])
+                        except:
+                            print(f"Failed to remove country block for {block['app_name']} -> {block['country_code']}")
+
+                # Final cleanup of any remaining ipsets
+                try:
+                    self.interceptor.cleanup_country_blocks()
+                    print("Cleaned up country ipsets")
+                except:
+                    print("Failed to cleanup country ipsets")
+
         except Exception as e:
             print(f"\nWarning: Cleanup encountered errors: {e}")
             print("Some resources may need manual cleanup")
