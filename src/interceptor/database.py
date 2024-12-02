@@ -1,6 +1,6 @@
 import sqlite3
 import logging
-from typing import List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional
 
 class DatabaseHandler:
     def __init__(self, db_path: str = "interceptor.db"):
@@ -159,7 +159,7 @@ class DatabaseHandler:
             self.logger.error(f"Database error removing country block: {e}")
             return False
         
-    def get_active_country_blocks(self) -> List[Tuple]:
+    def get_active_country_blocks(self) -> List[Dict]:
         """Get all active country blocks"""
         try:
             with sqlite3.connect(self.db_path) as conn:
@@ -169,7 +169,15 @@ class DatabaseHandler:
                     FROM country_blocks 
                     WHERE active = 1
                 ''')
-                return cursor.fetchall()
+                rows = cursor.fetchall()
+                return [
+                    {
+                        'id': row[0],
+                        'app_name': row[1],
+                        'country_code': row[2]
+                    }
+                    for row in rows
+                ]
         except sqlite3.Error as e:
             self.logger.error(f"Database error getting country blocks: {e}")
             return []
