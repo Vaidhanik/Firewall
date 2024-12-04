@@ -1,6 +1,6 @@
 import sqlite3
 import logging
-from typing import List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional
 
 class DatabaseHandler:
     def __init__(self, db_path: str = "interceptor.db"):
@@ -37,6 +37,18 @@ class DatabaseHandler:
                     FOREIGN KEY (rule_id) REFERENCES blocking_rules(id)
                 )
             ''')
+
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS country_blocks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    app_name TEXT NOT NULL,
+                    country_code TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    active BOOLEAN DEFAULT 1,
+                    UNIQUE(app_name, country_code)
+                )
+            ''')
+
             conn.commit()
             
     def add_rule(self, app_name: str, target: str, target_type: str, resolved_ips: List[str]) -> Optional[int]:
@@ -115,3 +127,57 @@ class DatabaseHandler:
         except sqlite3.Error as e:
             self.logger.error(f"Database error updating IPs: {e}")
             return False
+        
+    def add_country_block(self, app_name: str, country_code: str) -> Optional[int]:
+        """Add new country block"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT OR REPLACE INTO country_blocks 
+                    (app_name, country_code, active)
+                    VALUES (?, ?, 1)
+                ''', (app_name, country_code))
+                return cursor.lastrowid
+        except sqlite3.Error as e:
+            self.logger.error(f"Database error adding country block: {e}")
+            return None
+        
+    def remove_country_block(self, app_name: str, country_code: str) -> bool:
+        """Remove country block"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE country_blocks 
+                    SET active = 0 
+                    WHERE app_name = ? AND country_code = ?
+                ''', (app_name, country_code))
+                conn.commit()
+                return True
+        except sqlite3.Error as e:
+            self.logger.error(f"Database error removing country block: {e}")
+            return False
+        
+    def get_active_country_blocks(self) -> List[Dict]:
+        """Get all active country blocks"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT id, app_name, country_code 
+                    FROM country_blocks 
+                    WHERE active = 1
+                ''')
+                rows = cursor.fetchall()
+                return [
+                    {
+                        'id': row[0],
+                        'app_name': row[1],
+                        'country_code': row[2]
+                    }
+                    for row in rows
+                ]
+        except sqlite3.Error as e:
+            self.logger.error(f"Database error getting country blocks: {e}")
+            return []

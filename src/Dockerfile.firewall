@@ -9,6 +9,9 @@ RUN apt-get update && apt-get install -y \
     procps \
     iptables \
     cgroup-tools \
+    ipset \
+    xtables-addons-common \
+    xtables-addons-dkms \
     && rm -rf /var/lib/apt/lists/*
 
 # Set up the working directory

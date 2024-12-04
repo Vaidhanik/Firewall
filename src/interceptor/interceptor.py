@@ -68,6 +68,22 @@ class NetworkInterceptor():
             f"({source_ip}) -> {target}\nDetails: {details}"
         )
 
+    def block_country(self, app_name: str, country_code: str) -> bool:
+        """Block a country for an application"""
+        return self.interceptor.block_country(app_name, country_code)
+        
+    def unblock_country(self, app_name: str, country_code: str) -> bool:
+        """Unblock a country for an application"""
+        return self.interceptor.unblock_country(app_name, country_code)
+        
+    def get_blocked_countries(self) -> List[Tuple]:
+        """Get all active country blocks"""
+        return self.interceptor.get_blocked_countries()
+        
+    def cleanup_country_blocks(self):
+        """Clean up all country blocks"""
+        self.interceptor.cleanup_country_blocks()
+
     def _is_ip(self, addr: str) -> bool:
         """Check if string is IP address"""
         return self.interceptor._is_ip(addr)

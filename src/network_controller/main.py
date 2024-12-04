@@ -1,5 +1,5 @@
 from .controller import NetworkController
-from .menu import display_menu, handle_block_app, handle_view_rules, handle_view_logs
+from .menu import display_menu, handle_block_app, handle_view_rules, handle_view_logs, handle_block_country, handle_view_country_blocks
 
 def main():
     """Main application loop"""
@@ -56,6 +56,12 @@ def main():
                     print("You may need to restart your browsers.")
                     
             elif choice == "10":
+                handle_block_country(controller)
+                
+            elif choice == "11":
+                handle_view_country_blocks(controller)
+                
+            elif choice == "12":
                 print("\nCleaning up and exiting...")
                 controller.cleanup()
                 break
