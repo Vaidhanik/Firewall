@@ -41,6 +41,8 @@ services:
     environment:
       - MONGO_INITDB_ROOT_USERNAME=mongorulesuser
       - MONGO_INITDB_ROOT_PASSWORD=rulespass
+    networks:
+      - vaidhanik
     ports:
       - "27018:27017"
     volumes:
@@ -52,22 +54,39 @@ services:
     environment:
       - MONGO_INITDB_ROOT_USERNAME=mongoattemptsuser
       - MONGO_INITDB_ROOT_PASSWORD=attemptspass
+    networks:
+      - vaidhanik
     ports:
       - "27019:27017"
     volumes:
       - mongo_attempts:/data/db
 
-  mongo-express:
-    image: mongo-express:latest
-    container_name: mongo-express-interceptor
+  mongo-express-rules:
+    image: mongo-express
+    container_name: db-mongo-express-rules
+    ports:
+      - 8081:8081
+    networks:
+      - vaidhanik
     environment:
-      - ME_CONFIG_MONGODB_SERVER=mongo-rules,mongo-attempts
       - ME_CONFIG_MONGODB_ADMINUSERNAME=mongorulesuser
       - ME_CONFIG_MONGODB_ADMINPASSWORD=rulespass
-      - ME_CONFIG_BASICAUTH_USERNAME=admin
-      - ME_CONFIG_BASICAUTH_PASSWORD=pass123
+      - ME_CONFIG_MONGODB_SERVER=mongo-rules
+    depends_on:
+      - mongo-rules
+      - mongo-attempts
+ 
+  mongo-express-attempts:
+    image: mongo-express
+    container_name: db-mongo-express-attempts
     ports:
-      - "8081:8081"
+      - 8082:8081
+    networks:
+      - vaidhanik
+    environment:
+      - ME_CONFIG_MONGODB_ADMINUSERNAME=mongoattemptsuser
+      - ME_CONFIG_MONGODB_ADMINPASSWORD=attemptspass
+      - ME_CONFIG_MONGODB_SERVER= mongo-attempts
     depends_on:
       - mongo-rules
       - mongo-attempts
@@ -77,3 +96,7 @@ volumes:
     driver: local
   mongo_attempts:
     driver: local
+
+networks:
+  vaidhanik:
+    driver: bridge
