@@ -21,7 +21,8 @@ class NetworkInterceptor():
             raise NotImplementedError(f"Unsupported operating system: {os_type}")
             
         # Initialize database handler
-        self.db = DatabaseHandler(db_path)
+        # self.db = DatabaseHandler(db_path)
+        self.db = DatabaseHandler()
         
         # Setup logging
         self.interceptor.setup_logging()
