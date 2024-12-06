@@ -120,6 +120,7 @@ run-tracer:
 run-panel:
 	sudo rm -rf logs
 	sudo rm -rf src/network_controller/logs
+	make upd
 	sudo $(FIREWALL_DIR)/test/.firewall/bin/python3 ./src/run_controller.py
 
 test-firewall:
