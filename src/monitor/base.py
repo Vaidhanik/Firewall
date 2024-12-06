@@ -1,13 +1,19 @@
 import csv
+import os
 import time
 import json
 import socket
 import logging
 import datetime
 from pathlib import Path
+from pymongo import MongoClient
+from typing import Dict, Optional
 from collections import defaultdict
 from abc import ABC, abstractmethod
-from typing import Dict, Optional
+
+from dotenv import load_dotenv
+load_dotenv()
+
 
 class NetworkMonitorBase(ABC):
     def __init__(self):
@@ -17,7 +23,7 @@ class NetworkMonitorBase(ABC):
         
         self.active_apps = set()
         self.start_time = datetime.datetime.now()
-        
+        self.__init_db__()
         # Service ports mapping
         self.service_ports = {
             # Email related ports
@@ -72,6 +78,27 @@ class NetworkMonitorBase(ABC):
             print(f"    {interface}: {mac}")
 
         self.initialize_logs()
+
+    def __init_db__(self):
+        self.mongo_host = os.environ.get('MONITOR_MONGO_HOST', 'localhost')
+        self.mongo_port = int(os.environ.get('MONITOR_MONGO_PORT', '27020'))
+        self.mongo_user = os.environ.get('MONITOR_MONGO_ROOT_USERNAME', 'mongouser')
+        self.mongo_pass = os.environ.get('MONITOR_MONGO_ROOT_PASSWORD', 'mongopass')
+        try:
+           self.mongo_client = MongoClient(
+               host=self.mongo_host,
+               port=self.mongo_port,
+               username=self.mongo_user,
+               password=self.mongo_pass
+           )
+           self.db = self.mongo_client.network_monitor
+           self.connections_collection = self.db.connections
+           self.stats_collection = self.db.app_stats
+           self.email_collection = self.db.email_traffic
+           print("Successfully connected to MongoDB")
+        except Exception as e:
+           print(f"Warning: MongoDB connection failed: {e}")
+           self.mongo_client = None
 
     def initialize_logs(self):
         """Initialize log files with headers"""
@@ -218,6 +245,13 @@ class NetworkMonitorBase(ABC):
             with open(self.conn_file, 'a', newline='') as f:
                 writer = csv.DictWriter(f, fieldnames=self.conn_headers)
                 writer.writerow(conn_row)
+
+            # Log to MongoDB
+            if self.mongo_client:
+                try:
+                    self.connections_collection.insert_one(conn_row)
+                except Exception as e:
+                    print(f"Error writing to MongoDB connections collection: {e}")
         except Exception as e:
             print(f"Error writing to connection log: {e}")
 
@@ -288,6 +322,12 @@ class NetworkMonitorBase(ABC):
                     'email_connections': stats['email_connections']
                 }
                 writer.writerow(row)
+                # MongoDB
+                if self.mongo_client:
+                    try:
+                        self.stats_collection.insert_one(row)
+                    except Exception as e:
+                        print(f"Error writing to MongoDB stats collection: {e}")
 
     def monitor(self):
         """Main monitoring loop"""
@@ -367,6 +407,12 @@ class NetworkMonitorBase(ABC):
             summary_file = self.logs_dir / f'monitor_summary_{end_time.strftime("%Y%m%d_%H%M%S")}.json'
             with open(summary_file, 'w') as f:
                 json.dump(summary, f, indent=2)
+
+            if self.mongo_client:
+                try:
+                    self.mongo_client.close()
+                except Exception as e:
+                    print(f"Error closing MongoDB connection: {e}")
 
             print("\nNetwork Monitor Summary:")
             print(f"Session Duration: {duration}")
