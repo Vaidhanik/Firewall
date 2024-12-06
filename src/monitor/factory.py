@@ -1,7 +1,7 @@
 import sys
 import logging
-from typing import Optional, Dict, Callable
 from .base import NetworkMonitorBase
+from typing import Optional, Dict, Callable
 from .exceptions import UnsupportedOSError, DependencyError
 
 class MonitorFactory:
