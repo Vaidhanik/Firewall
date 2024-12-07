@@ -82,7 +82,7 @@ services:
     networks:
       - vaidhanik
     environment:
-      - ME_CONFIG_MONGODB_ADMINUSERNAME=MONITOR
+      - ME_CONFIG_MONGODB_ADMINUSERNAME=mongorulesuser
       - ME_CONFIG_MONGODB_ADMINPASSWORD=rulespass
       - ME_CONFIG_MONGODB_SERVER=mongo-rules
     depends_on:
