@@ -124,14 +124,30 @@ unblock-rule:
 		-d '{"rule_id":$(RULE_ID)}' | jq '.'
 
 server-health:
-	curl http://localhost:5000/health
+	@echo "$(YELLOW)Checking server health...$(NC)"
+	@curl -s http://localhost:5000/health | jq '.' || echo "$(RED)Server not responding$(NC)"
 
 server-apps:
-	curl http://localhost:5000/apps
+	@echo "$(YELLOW)Fetching installed applications...$(NC)"
+	@RESPONSE=$$(curl -s http://localhost:5000/apps); \
+	if [ $$? -eq 0 ]; then \
+		echo "$$RESPONSE" | jq '.apps[] | select(. != null) | "• " + .' -r; \
+		echo "\n$(GREEN)Total Apps: $$(echo "$$RESPONSE" | jq '.apps | length')$(NC)"; \
+	else \
+		echo "$(RED)Failed to fetch applications$(NC)"; \
+	fi
 
 server-rules:
-	curl http://localhost:5000/rules
-
+	@echo "$(YELLOW)Fetching active firewall rules...$(NC)"
+	@RESPONSE=$$(curl -s http://localhost:5000/rules); \
+	if [ $$? -eq 0 ]; then \
+		echo "$(GREEN)Active Rules:$(NC)"; \
+		echo "$$RESPONSE" | jq -r '.rules[] | "• App: \(.app)\n  Target: \(.target)\n  Type: \(.type)\n  IPs: \(.ips | join(", "))\n"'; \
+		echo "$(GREEN)Total Rules: $$(echo "$$RESPONSE" | jq '.rules | length')$(NC)"; \
+	else \
+		echo "$(RED)Failed to fetch rules$(NC)"; \
+	fi
+	
 clean:
 	@rm -f $(TEMP_FILE)
 	@echo "$(GREEN)Cleaned up temporary files$(NC)"
