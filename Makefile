@@ -42,6 +42,7 @@ start:
 	sudo $(FIREWALL_DIR)/test/.firewall/bin/python3 ./src/server.py
 
 stop:
+	@make cleanup-rules
 	@echo "$(YELLOW)Stopping server...$(NC)"
 	@sudo pkill -f "python3 ./src/server.py" || true
 	@echo "$(GREEN)Server stopped$(NC)"
@@ -49,29 +50,6 @@ stop:
 cleanup-rules:
 	@echo "$(YELLOW)Cleaning up firewall rules and saving state...$(NC)"
 	@curl -s -X POST $(API_URL)/cleanup | jq '.'
-	@make stop
-
-# get-network-data:
-# 	$(call check_vars,$(DURATION),DURATION,get-network-data)
-# 	@echo "$(YELLOW)Retrieving network data for last $(DURATION) (type: $(DATA_TYPE))...$(NC)"
-# 	@curl -s "$(API_URL)/network-data?duration=$(DURATION)&type=$(DATA_TYPE)" | \
-# 		tee $(NETWORK_DATA_FILE) | jq '.'
-# 	@if [ $$? -eq 0 ] && [ -f $(NETWORK_DATA_FILE) ]; then \
-# 		echo "\n$(GREEN)Summary:$(NC)"; \
-# 		echo "$(GREEN)==========$(NC)"; \
-# 		echo "Data Type: $$(cat $(NETWORK_DATA_FILE) | jq -r '.summary.data_type')"; \
-# 		echo "Duration: $$(cat $(NETWORK_DATA_FILE) | jq -r '.summary.duration')"; \
-# 		echo "Start Time: $$(cat $(NETWORK_DATA_FILE) | jq -r '.summary.start_time')"; \
-# 		echo "End Time: $$(cat $(NETWORK_DATA_FILE) | jq -r '.summary.end_time')"; \
-# 		echo "Total Entries: $$(cat $(NETWORK_DATA_FILE) | jq -r '.summary.total_entries')"; \
-# 		if [ "$$(cat $(NETWORK_DATA_FILE) | jq -r '.data[0]')" != "null" ]; then \
-# 			echo "\n$(GREEN)Sample Entry (First Record):$(NC)"; \
-# 			echo "$(GREEN)=========================$(NC)"; \
-# 			cat $(NETWORK_DATA_FILE) | jq '.data[0]'; \
-# 		fi \
-# 	else \
-# 		echo "$(RED)Failed to retrieve data$(NC)"; \
-# 	fi
 
 get-network-data:
 	$(call check_vars,$(DURATION),DURATION,get-network-data)
