@@ -5,6 +5,8 @@ API_URL ?= http://localhost:5000
 SEARCH ?= 
 TARGET ?= 
 APP_NUMBER ?= 
+DURATION ?= 1hr
+DATA_TYPE ?= connections
 
 # Colors for output
 GREEN := \033[0;32m
@@ -32,6 +34,7 @@ fi
 #================================================================#
 
 TEMP_FILE := .search_results.tmp
+NETWORK_DATA_FILE := .network_data.tmp
 
 start:
 	rm -rf src/vaidhanik
@@ -47,6 +50,54 @@ cleanup-rules:
 	@echo "$(YELLOW)Cleaning up firewall rules and saving state...$(NC)"
 	@curl -s -X POST $(API_URL)/cleanup | jq '.'
 	@make stop
+
+# get-network-data:
+# 	$(call check_vars,$(DURATION),DURATION,get-network-data)
+# 	@echo "$(YELLOW)Retrieving network data for last $(DURATION) (type: $(DATA_TYPE))...$(NC)"
+# 	@curl -s "$(API_URL)/network-data?duration=$(DURATION)&type=$(DATA_TYPE)" | \
+# 		tee $(NETWORK_DATA_FILE) | jq '.'
+# 	@if [ $$? -eq 0 ] && [ -f $(NETWORK_DATA_FILE) ]; then \
+# 		echo "\n$(GREEN)Summary:$(NC)"; \
+# 		echo "$(GREEN)==========$(NC)"; \
+# 		echo "Data Type: $$(cat $(NETWORK_DATA_FILE) | jq -r '.summary.data_type')"; \
+# 		echo "Duration: $$(cat $(NETWORK_DATA_FILE) | jq -r '.summary.duration')"; \
+# 		echo "Start Time: $$(cat $(NETWORK_DATA_FILE) | jq -r '.summary.start_time')"; \
+# 		echo "End Time: $$(cat $(NETWORK_DATA_FILE) | jq -r '.summary.end_time')"; \
+# 		echo "Total Entries: $$(cat $(NETWORK_DATA_FILE) | jq -r '.summary.total_entries')"; \
+# 		if [ "$$(cat $(NETWORK_DATA_FILE) | jq -r '.data[0]')" != "null" ]; then \
+# 			echo "\n$(GREEN)Sample Entry (First Record):$(NC)"; \
+# 			echo "$(GREEN)=========================$(NC)"; \
+# 			cat $(NETWORK_DATA_FILE) | jq '.data[0]'; \
+# 		fi \
+# 	else \
+# 		echo "$(RED)Failed to retrieve data$(NC)"; \
+# 	fi
+
+get-network-data:
+	$(call check_vars,$(DURATION),DURATION,get-network-data)
+	@echo "$(YELLOW)Retrieving network data for last $(DURATION) (type: $(DATA_TYPE))...$(NC)"
+	@RESPONSE=$$(curl -s "$(API_URL)/network-data?duration=$(DURATION)&type=$(DATA_TYPE)"); \
+	echo "$$RESPONSE" > $(NETWORK_DATA_FILE); \
+	if [ $$? -eq 0 ]; then \
+		if [ "$$(echo "$$RESPONSE" | jq -r '.success')" = "true" ]; then \
+			echo "\n$(GREEN)Data Summary:$(NC)"; \
+			echo "────────────────────────"; \
+			echo "• Data Type: $$(cat $(NETWORK_DATA_FILE) | jq -r '.summary.data_type')"; \
+			echo "• Duration: $$(echo "$$RESPONSE" | jq -r '.summary.duration')"; \
+			echo "• Start Time: $$(cat $(NETWORK_DATA_FILE) | jq -r '.summary.start_time')"; \
+			echo "• End Time: $$(cat $(NETWORK_DATA_FILE) | jq -r '.summary.end_time')"; \
+			echo "• Total Records: $$(echo "$$RESPONSE" | jq -r '.summary.total_entries')"; \
+			if [ "$$(echo "$$RESPONSE" | jq -r '.data | length')" -gt 0 ]; then \
+				echo "\n$(GREEN)Latest Record:$(NC)"; \
+				echo "────────────────────────"; \
+				echo "$$RESPONSE" | jq '.data[0]'; \
+			fi; \
+		else \
+			echo "$(RED)Error: $$(echo "$$RESPONSE" | jq -r '.error')$(NC)"; \
+		fi; \
+	else \
+		echo "$(RED)Failed to retrieve data$(NC)"; \
+	fi
 
 # Two-step blocking process
 search-app:
@@ -106,6 +157,8 @@ server-rules:
 clean:
 	@rm -f $(TEMP_FILE)
 	@echo "$(GREEN)Cleaned up temporary files$(NC)"
+	@rm -f $(NETWORK_DATA_FILE)
+	@echo "$(GREEN)Cleaned up network data files$(NC)"
 
 #================================================================#
 #=======================NETWORK_CONTROLLER=======================#
