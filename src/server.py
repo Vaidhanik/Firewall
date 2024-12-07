@@ -5,7 +5,16 @@ import subprocess
 from flask import Flask, request, jsonify
 from network_controller import NetworkController
 
+from pymongo import MongoClient
+from datetime import datetime, timedelta
+from pymongo.errors import PyMongoError, ServerSelectionTimeoutError, ConnectionFailure
+
 os.makedirs('src/vaidhanik', exist_ok=True)
+
+MONITOR_MONGO_HOST = os.environ.get('MONITOR_MONGO_HOST', 'localhost')
+MONITOR_MONGO_PORT = int(os.environ.get('MONITOR_MONGO_PORT', '27020'))
+MONITOR_MONGO_USERNAME = os.environ.get('MONITOR_MONGO_ROOT_USERNAME', 'mongouser')
+MONITOR_MONGO_PASSWORD = os.environ.get('MONITOR_MONGO_ROOT_PASSWORD', 'mongopass')
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -23,6 +32,39 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 controller = NetworkController()
+
+def parse_duration(duration_str: str) -> timedelta:
+    """Convert duration string to timedelta"""
+    duration_map = {
+        'min': {'multiplier': 1, 'unit': 'minutes'},
+        'mins': {'multiplier': 1, 'unit': 'minutes'},
+        'hour': {'multiplier': 1, 'unit': 'hours'},
+        'hr': {'multiplier': 1, 'unit': 'hours'},
+        'hrs': {'multiplier': 1, 'unit': 'hours'},
+        'day': {'multiplier': 1, 'unit': 'days'},
+        'days': {'multiplier': 1, 'unit': 'days'},
+        'week': {'multiplier': 7, 'unit': 'days'},
+        'weeks': {'multiplier': 7, 'unit': 'days'}
+    }
+    
+    try:
+        # Extract number and unit
+        import re
+        match = re.match(r'(\d+)\s*(\w+)', duration_str.lower())
+        if not match:
+            raise ValueError("Invalid duration format")
+            
+        value, unit = match.groups()
+        value = int(value)
+        
+        if unit not in duration_map:
+            raise ValueError(f"Unsupported time unit: {unit}")
+            
+        unit_info = duration_map[unit]
+        return timedelta(**{unit_info['unit']: value * unit_info['multiplier']})
+        
+    except (ValueError, AttributeError) as e:
+        raise ValueError(f"Invalid duration format: {str(e)}")
 
 def verify_container_permissions():
     """Verify container has necessary permissions"""
@@ -413,7 +455,138 @@ def get_logs():
             'success': False,
             'error': f"Failed to get logs: {str(e)}"
         }), 500
-    
+
+@app.route('/network-data', methods=['GET'])
+def get_network_data():
+    """
+    Get network monitoring data for specified duration
+    Query parameters:
+    - duration: time duration (e.g., "1hr", "30mins", "1day", "1week")
+    - type: data type (connections/stats/email) - optional
+    """
+    try:
+        # 1. Validate input parameters
+        duration_str = request.args.get('duration')
+        data_type = request.args.get('type', 'connections')
+        
+        if not duration_str:
+            return jsonify({
+                'success': False,
+                'error': 'Duration parameter is required'
+            }), 400
+        
+        # 2. Parse duration
+        try:
+            duration = parse_duration(duration_str)
+        except ValueError as e:
+            return jsonify({
+                'success': False,
+                'error': str(e),
+                'valid_formats': '30mins, 1hr, 24hrs, 7days, 1week'
+            }), 400
+        
+        # Connect to MongoDB
+        try:
+            client = MongoClient(
+                host=MONITOR_MONGO_HOST,
+                port=MONITOR_MONGO_PORT,
+                username=MONITOR_MONGO_USERNAME,
+                password=MONITOR_MONGO_PASSWORD,
+                serverSelectionTimeoutMS=5000
+            )
+            db = client.network_monitor
+            
+            end_time = datetime.now()  # Use local time instead of UTC
+            start_time = end_time - duration
+            
+            # Select collection based on data type
+            collection_map = {
+                'connections': db.connections,
+                'stats': db.app_stats,
+                'email': db.email_traffic
+            }
+            
+            if data_type not in collection_map:
+                return jsonify({
+                    'success': False,
+                    'error': f'Invalid data type. Valid types are: {", ".join(collection_map.keys())}'
+                }), 400
+                
+            collection = collection_map[data_type]
+            
+            # Query data
+            query = {
+                'timestamp': {
+                    '$gte': start_time.isoformat(),  # Convert to ISO format string
+                    '$lte': end_time.isoformat()     # Convert to ISO format string
+                }
+            }
+            
+            total_count = collection.count_documents(query)
+            
+            # 8. Check if any data exists
+            if total_count == 0:
+                return jsonify({
+                    'success': False,
+                    'error': f'No {data_type} data found for the specified duration',
+                    'duration': duration_str,
+                    'start_time': start_time.isoformat(),
+                    'end_time': end_time.isoformat(),
+                    'count': 0
+                }), 404
+
+            # Execute query and convert to list
+            data = list(collection.find(query, {'_id': 0}))
+            
+            # Check if data exists
+            if not data:
+                return jsonify({
+                    'success': False,
+                    'error': f'No {data_type} data found for the specified duration',
+                    'duration': duration_str,
+                    'start_time': start_time.isoformat(),
+                    'end_time': end_time.isoformat()
+                }), 404
+                
+            return jsonify({
+                'success': True,
+                'summary': {
+                    'data_type': data_type,
+                    'duration': duration_str,
+                    'start_time': start_time.isoformat(),
+                    'end_time': end_time.isoformat(),
+                    'total_entries': total_count
+                },
+                'data': data
+            })
+            
+        except (ConnectionFailure, ServerSelectionTimeoutError) as e:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to connect to MongoDB',
+                'details': str(e)
+            }), 503
+            
+        except Exception as e:
+            logger.error(f"Database error: {str(e)}\n{traceback.format_exc()}")
+            return jsonify({
+                'success': False,
+                'error': 'Database error occurred',
+                'details': str(e)
+            }), 500
+            
+        finally:
+            if 'client' in locals():
+                client.close()
+                
+    except Exception as e:
+        logger.error(f"Unexpected error in network-data endpoint: {str(e)}\n{traceback.format_exc()}")
+        return jsonify({
+            'success': False,
+            'error': 'Internal server error',
+            'details': str(e)
+        }), 500
+      
 @app.route('/cleanup', methods=['POST'])
 def cleanup():
     """Cleanup firewall rules and save final state"""

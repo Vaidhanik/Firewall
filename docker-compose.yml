@@ -61,6 +61,19 @@ services:
     volumes:
       - mongo_attempts:/data/db
 
+  mongo-monitor:
+    image: mongo:latest
+    container_name: network_monitor_db
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=mongomonitor
+      - MONGO_INITDB_ROOT_PASSWORD=monitorpass
+    ports:
+      - "27020:27017"
+    volumes:
+      - mongo_monitor:/data/db
+    networks:
+      - vaidhanik
+
   mongo-express-rules:
     image: mongo-express
     container_name: db-mongo-express-rules
@@ -74,6 +87,7 @@ services:
       - ME_CONFIG_MONGODB_SERVER=mongo-rules
     depends_on:
       - mongo-rules
+      - mongo-monitor
       - mongo-attempts
  
   mongo-express-attempts:
@@ -86,15 +100,35 @@ services:
     environment:
       - ME_CONFIG_MONGODB_ADMINUSERNAME=mongoattemptsuser
       - ME_CONFIG_MONGODB_ADMINPASSWORD=attemptspass
-      - ME_CONFIG_MONGODB_SERVER= mongo-attempts
+      - ME_CONFIG_MONGODB_SERVER=mongo-attempts
     depends_on:
       - mongo-rules
+      - mongo-monitor
       - mongo-attempts
+  
+  mongo-express-monitor:
+    image: mongo-express
+    container_name: db-mongo-express-monitor
+    ports:
+      - 8083:8081
+    networks:
+      - vaidhanik
+    environment:
+      - ME_CONFIG_MONGODB_ADMINUSERNAME=mongomonitor
+      - ME_CONFIG_MONGODB_ADMINPASSWORD=monitorpass
+      - ME_CONFIG_MONGODB_SERVER=mongo-monitor
+    depends_on:
+      - mongo-rules
+      - mongo-monitor
+      - mongo-attempts
+
 
 volumes:
   mongo_rules:
     driver: local
   mongo_attempts:
+    driver: local
+  mongo_monitor:
     driver: local
 
 networks:

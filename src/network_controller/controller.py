@@ -53,6 +53,67 @@ class NetworkController:
             'is_running': False
         })
 
+    def _run_monitor_process(self, running_flag, stats_dict):
+        """Running monitoring in separate process"""
+        try:
+            # Set process start method for windows
+            if sys.platform == 'win32':
+                multiprocessing.freeze_support()
+
+            log_file = self.logs_dir / 'monitor.log'
+            self.logs_dir.mkdir(exist_ok=True)
+
+            print(f"Monitor process starting, logging to: {log_file}")
+
+            with open(log_file, 'a') as f:
+                f.write(f"\n=== Monitor started at {datetime.now().isoformat()} ===\n")
+                f.flush()
+
+                while running_flag.value:  # Check the flag at the start of each loop
+                    try:
+                        if not running_flag.value:  # Double check before heavy operations
+                            break
+
+                        connections = self.monitor.get_connections()
+                        self.update_app_state(connections, quiet=True)
+
+                        for conn in connections:
+                            stats_dict['total_connections'] += 1
+                            allowed, rule = self.check_connection_allowed(conn)
+
+                            if not allowed:
+                                stats_dict['blocked_attempts'] += 1
+                                f.write(
+                                    f"{datetime.now().isoformat()} - Blocked: {conn['program']} -> "
+                                    f"{conn['remote_addr']}:{conn['remote_port']}\n"
+                                )
+                                f.flush()
+
+                                self.interceptor.enforce_firewall_rule(
+                                    conn['program'],
+                                    conn['remote_addr']
+                                )
+                            else:
+                                self.monitor.log_connection(conn)
+
+                        stats_dict['active_apps'] = len(self.internal.active_apps)
+                        stats_dict['active_rules'] = len(self.get_active_blocks())
+                        time.sleep(1)  # Add sleep to reduce CPU usage and allow interrupts
+
+                    except Exception as e:
+                        f.write(f"\nError in monitor loop: {e}\n")
+                        f.flush()
+                        time.sleep(1)
+
+        except Exception as e:
+            with open(self.logs_dir / 'monitor_error.log', 'a') as f:
+                f.write(f"\nFatal error in monitor process: {e}\n")
+        finally:
+            # Cleanup when process stops
+            if hasattr(self.monitor, '_cleanup'):
+                self.monitor._cleanup()
+            print("Monitor process cleanup completed")
+
     def start_proxy(self) -> bool:
         """Start the proxy server"""
         try:
@@ -89,22 +150,22 @@ class NetworkController:
                 # Signal the process to stop
                 self.monitor_running.value = False
 
-                # Give it a short time to cleanup gracefully
-                timeout = 5  # 5 seconds timeout
-                start_time = time.time()
-                while self.monitor_process.is_alive() and (time.time() - start_time) < timeout:
-                    time.sleep(0.1)
+                # Give it time to cleanup gracefully
+                for _ in range(10):  # Wait up to 2 seconds
+                    if not self.monitor_process.is_alive():
+                        break
+                    time.sleep(0.2)
 
-                # If still alive, terminate forcefully
+                # If still alive after grace period
                 if self.monitor_process.is_alive():
                     print("Monitor process didn't stop gracefully, terminating...")
                     self.monitor_process.terminate()
-                    self.monitor_process.join(1)  # Wait 1 second for termination
+                    self.monitor_process.join(2)  # Wait up to 2 seconds for termination
 
-                    # If still alive after terminate, kill it
+                    # If still alive after terminate
                     if self.monitor_process.is_alive():
                         print("Forcing monitor process to stop...")
-                        self.monitor_process.kill()
+                        self.monitor_process.kill()  # Force kill as last resort
                         self.monitor_process.join(1)
 
             except Exception as e:
@@ -112,7 +173,9 @@ class NetworkController:
             finally:
                 self.monitor_stats['is_running'] = False
                 print("Monitor process stopped")
-
+                return True
+        return False
+    
     def start_detached_monitor(self) -> bool:
         """Start monitoring in a separate process"""
         if self.monitor_process and self.monitor_process.is_alive():
@@ -147,71 +210,6 @@ class NetworkController:
             self.monitor_stats['is_running'] = False
             self.monitor_running.value = False
             return False
-
-    def _run_monitor_process(self, running_flag, stats_dict):
-        """Running monitoring in separate process"""
-        try:
-            # Set process start method for windows
-            if sys.platform == 'win32':
-                multiprocessing.freeze_support()
-
-            # Create logs directory if it doesn't exist
-            log_file = self.logs_dir / 'monitor.log'
-            self.logs_dir.mkdir(exist_ok=True)
-
-            print(f"Monitor process starting, logging to: {log_file}")  # Debug print
-
-            with open(log_file, 'a') as f:
-                f.write(f"\n=== Monitor started at {datetime.now().isoformat()} ===\n")
-                f.flush()  # Force write to file
-
-                while running_flag.value:
-                    try:
-                        connections = self.monitor.get_connections()
-                        self.update_app_state(connections, quiet=True)
-
-                        for conn in connections:
-                            stats_dict['total_connections'] += 1
-                            allowed, rule = self.check_connection_allowed(conn)
-
-                            if not allowed:
-                                stats_dict['blocked_attempts'] += 1
-                                f.write(
-                                    f"{datetime.now().isoformat()} - Blocked: {conn['program']} -> "
-                                    f"{conn['remote_addr']}:{conn['remote_port']}\n"
-                                )
-                                f.flush()  # Force write to file
-
-                                if conn['program'] in self.internal.app_states:
-                                    self.internal.app_states[conn['program']]['blocked_attempts'] += 1
-
-                                self.interceptor.enforce_firewall_rule(
-                                    conn['program'],
-                                    conn['remote_addr']
-                                )
-                            else:
-                                self.monitor.log_connection(conn)
-                                f.write(
-                                    f"{datetime.now().isoformat()} - Allowed: {conn['program']} -> "
-                                    f"{conn['remote_addr']}:{conn['remote_port']}\n"
-                                )
-                                f.flush()  # Force write to file
-
-                        stats_dict['active_apps'] = len(self.internal.active_apps)
-                        stats_dict['active_rules'] = len(self.get_active_blocks())
-                        time.sleep(1)
-
-                    except Exception as e:
-                        f.write(f"\nError in monitor loop: {e}\n")
-                        f.flush()
-                        time.sleep(1)  # Avoid tight loop on error
-
-        except Exception as e:
-            with open(self.logs_dir / 'monitor_error.log', 'a') as f:
-                f.write(f"\nFatal error in monitor process: {e}\n")
-        finally:
-            if hasattr(self.monitor, '_cleanup'):
-                self.monitor._cleanup()
 
     def get_monitor_status(self) -> Dict:
         """Get status of monitoring process"""

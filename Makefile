@@ -5,6 +5,8 @@ API_URL ?= http://localhost:5000
 SEARCH ?= 
 TARGET ?= 
 APP_NUMBER ?= 
+DURATION ?= 1hr
+DATA_TYPE ?= connections
 
 # Colors for output
 GREEN := \033[0;32m
@@ -32,6 +34,7 @@ fi
 #================================================================#
 
 TEMP_FILE := .search_results.tmp
+NETWORK_DATA_FILE := .network_data.tmp
 
 start:
 	rm -rf src/vaidhanik
@@ -39,6 +42,7 @@ start:
 	sudo $(FIREWALL_DIR)/test/.firewall/bin/python3 ./src/server.py
 
 stop:
+	@make cleanup-rules
 	@echo "$(YELLOW)Stopping server...$(NC)"
 	@sudo pkill -f "python3 ./src/server.py" || true
 	@echo "$(GREEN)Server stopped$(NC)"
@@ -46,7 +50,32 @@ stop:
 cleanup-rules:
 	@echo "$(YELLOW)Cleaning up firewall rules and saving state...$(NC)"
 	@curl -s -X POST $(API_URL)/cleanup | jq '.'
-	@make stop
+
+get-network-data:
+	$(call check_vars,$(DURATION),DURATION,get-network-data)
+	@echo "$(YELLOW)Retrieving network data for last $(DURATION) (type: $(DATA_TYPE))...$(NC)"
+	@RESPONSE=$$(curl -s "$(API_URL)/network-data?duration=$(DURATION)&type=$(DATA_TYPE)"); \
+	echo "$$RESPONSE" > $(NETWORK_DATA_FILE); \
+	if [ $$? -eq 0 ]; then \
+		if [ "$$(echo "$$RESPONSE" | jq -r '.success')" = "true" ]; then \
+			echo "\n$(GREEN)Data Summary:$(NC)"; \
+			echo "────────────────────────"; \
+			echo "• Data Type: $$(cat $(NETWORK_DATA_FILE) | jq -r '.summary.data_type')"; \
+			echo "• Duration: $$(echo "$$RESPONSE" | jq -r '.summary.duration')"; \
+			echo "• Start Time: $$(cat $(NETWORK_DATA_FILE) | jq -r '.summary.start_time')"; \
+			echo "• End Time: $$(cat $(NETWORK_DATA_FILE) | jq -r '.summary.end_time')"; \
+			echo "• Total Records: $$(echo "$$RESPONSE" | jq -r '.summary.total_entries')"; \
+			if [ "$$(echo "$$RESPONSE" | jq -r '.data | length')" -gt 0 ]; then \
+				echo "\n$(GREEN)Latest Record:$(NC)"; \
+				echo "────────────────────────"; \
+				echo "$$RESPONSE" | jq '.data[0]'; \
+			fi; \
+		else \
+			echo "$(RED)Error: $$(echo "$$RESPONSE" | jq -r '.error')$(NC)"; \
+		fi; \
+	else \
+		echo "$(RED)Failed to retrieve data$(NC)"; \
+	fi
 
 # Two-step blocking process
 search-app:
@@ -95,17 +124,35 @@ unblock-rule:
 		-d '{"rule_id":$(RULE_ID)}' | jq '.'
 
 server-health:
-	curl http://localhost:5000/health
+	@echo "$(YELLOW)Checking server health...$(NC)"
+	@curl -s http://localhost:5000/health | jq '.' || echo "$(RED)Server not responding$(NC)"
 
 server-apps:
-	curl http://localhost:5000/apps
+	@echo "$(YELLOW)Fetching installed applications...$(NC)"
+	@RESPONSE=$$(curl -s http://localhost:5000/apps); \
+	if [ $$? -eq 0 ]; then \
+		echo "$$RESPONSE" | jq '.apps[] | select(. != null) | "• " + .' -r; \
+		echo "\n$(GREEN)Total Apps: $$(echo "$$RESPONSE" | jq '.apps | length')$(NC)"; \
+	else \
+		echo "$(RED)Failed to fetch applications$(NC)"; \
+	fi
 
 server-rules:
-	curl http://localhost:5000/rules
-
+	@echo "$(YELLOW)Fetching active firewall rules...$(NC)"
+	@RESPONSE=$$(curl -s http://localhost:5000/rules); \
+	if [ $$? -eq 0 ]; then \
+		echo "$(GREEN)Active Rules:$(NC)"; \
+		echo "$$RESPONSE" | jq -r '.rules[] | "• App: \(.app)\n  Target: \(.target)\n  Type: \(.type)\n  IPs: \(.ips | join(", "))\n"'; \
+		echo "$(GREEN)Total Rules: $$(echo "$$RESPONSE" | jq '.rules | length')$(NC)"; \
+	else \
+		echo "$(RED)Failed to fetch rules$(NC)"; \
+	fi
+	
 clean:
 	@rm -f $(TEMP_FILE)
 	@echo "$(GREEN)Cleaned up temporary files$(NC)"
+	@rm -f $(NETWORK_DATA_FILE)
+	@echo "$(GREEN)Cleaned up network data files$(NC)"
 
 #================================================================#
 #=======================NETWORK_CONTROLLER=======================#
