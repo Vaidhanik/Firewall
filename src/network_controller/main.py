@@ -1,5 +1,5 @@
 from .controller import NetworkController
-from .menu import check_monitor_data, display_menu, handle_block_app, handle_view_rules, handle_view_logs, handle_analyze_connections
+from .menu import check_monitor_data, display_menu, handle_block_app, handle_view_rules, handle_view_logs, handle_analyze_connections, handle_implement_recommendation
 
 def main():
     """Main application loop"""
@@ -66,6 +66,9 @@ def main():
 
             elif choice == "12":
                 check_monitor_data(controller)
+            
+            elif choice == "13":
+                handle_implement_recommendation(controller)
                 
             else:
                 print("\nInvalid option selected")

@@ -12,8 +12,60 @@ def display_menu():
     print("9. Stop proxy server")
     print("10. Exit")
     print("11. View Connection Patterns")
-    print("12. Debug: Check Monitor Data")  # Add this
-    return input("\nSelect an option (1-12): ").strip()
+    print("12. Debug: Check Monitor Data")
+    print("13. Implement AI Recommendation")
+    return input("\nSelect an option (1-13): ").strip()
+
+def handle_implement_recommendation(controller):
+    """Handle implementing AI recommendation"""
+    try:
+        # First show current recommendations
+        recommendations = controller.interceptor.db.get_inactive_ai_recommendations()
+        
+        if not recommendations:
+            print("\nNo Inactive AI recommendations found")
+            return
+            
+        print("\nAvailable AI Recommendations:")
+        for rec in recommendations:
+            # Get implementation status markers
+            is_implemented = '✓' if rec.get('implemented', False) else ' '
+            impl_status = rec.get('implementation_status', 'pending')
+            impl_time = rec.get('implementation_time', 'Not implemented')
+            
+            # Print recommendation info
+            print(f"\n[{is_implemented}] ID {rec['id']}: {rec['app_name']} → {rec['dest_ip']}")
+            print(f"   └─ Confidence: {rec['confidence'] * 100:.1f}%")
+            print(f"   └─ Reason: {rec['reason']}")
+            print(f"   └─ Status: {impl_status}")
+            print(f"   └─ Implementation Time: {impl_time}")
+            print(f"   └─ Last Updated: {rec['updated_at']}")
+            
+        # Get recommendation to implement
+        rec_id = input("\nEnter recommendation ID to implement (0 to cancel): ").strip()
+        if rec_id == '0':
+            return
+            
+        try:
+            rec_id = int(rec_id)
+        except ValueError:
+            print("\nInvalid ID format")
+            return
+            
+        # Check if already implemented
+        selected_rec = next((r for r in recommendations if r['id'] == rec_id), None)
+        if selected_rec and selected_rec.get('implemented', False):
+            print(f"\nRecommendation {rec_id} is already implemented")
+            return
+        
+        # Implement recommendation
+        if controller.implement_ai_recommendation(rec_id):
+            print(f"\n✓ Successfully implemented recommendation {rec_id}")
+        else:
+            print(f"\n✗ Failed to implement recommendation {rec_id}")
+            
+    except Exception as e:
+        print(f"Error handling recommendation implementation: {e}")
 
 def check_monitor_data(controller):
     """Check if monitor is storing data"""
@@ -40,7 +92,7 @@ def handle_analyze_connections(controller):
     """Analyze historical connections and show recommendations"""
     try:
         print("\nAnalyzing connection history...")
-        recommendations = controller.interceptor.db.analyze_historical_connections()
+        recommendations = controller.interceptor.db.analyze_historical_connections(n_records=100)
         
         if not recommendations:
             print("\nNo blocking recommendations found")
