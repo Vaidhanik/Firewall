@@ -21,7 +21,7 @@ class DecisionStorage:
         doc = {
             **connection.to_dict(),
             "allowed": allowed,
-            "created_at": datetime.utcnow()
+            "created_at": datetime.now().isoformat()
         }
         self.decisions.insert_one(doc)
         
