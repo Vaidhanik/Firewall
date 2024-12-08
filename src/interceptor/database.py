@@ -730,6 +730,15 @@ class DatabaseHandler:
                             "analysis": analysis
                         })
 
+            # STORAGE OF RULES
+            stored_recommendations = []
+            for rec in recommendations:
+                rec_id = self.store_ai_recommendation(rec)
+                if rec_id:
+                    rec['id'] = rec_id  # Add ID to recommendation
+                    stored_recommendations.append(rec)
+                    print(f"Stored recommendation ID: {rec_id} for {rec['app_name']} → {rec['dest_ip']}")
+
             # Sort by confidence
             recommendations.sort(key=lambda x: x['confidence'], reverse=True)
             print(f"\nGenerated {len(recommendations)} recommendations")
@@ -739,6 +748,13 @@ class DatabaseHandler:
             self.logger.error(f"Error analyzing connections: {e}")
             return []
 
+    """
+    MODELS
+    KE
+    LIYE
+    UPDATE
+    BELOW
+    """
     def _analyze_connection_group(self, connections: List[Dict]) -> Dict:
         """Analyze a group of connections for suspicious patterns"""
         try:
@@ -813,3 +829,70 @@ class DatabaseHandler:
                 "reason": "Analysis error",
                 "metrics": {}
             }
+        
+    def store_ai_recommendation(self, recommendation: Dict) -> Optional[int]:
+        """Store AI recommendation with unique ID"""
+        try:
+            # First check if recommendation already exists for this app->dest pair
+            existing_rec = self.ai_decisions_collection.find_one({
+                "app_name": recommendation["app_name"],
+                "dest_ip": recommendation["dest_ip"],
+                "active": True
+            })
+
+            doc = {
+                "app_name": recommendation["app_name"],
+                "dest_ip": recommendation["dest_ip"],
+                "confidence": recommendation["confidence"],
+                "reason": recommendation["reason"],
+                "connection_count": recommendation["connection_count"],
+                "analysis": recommendation["analysis"],
+                "updated_at": datetime.now().isoformat(),
+                "active": True
+            }
+
+            if existing_rec:
+                # Update existing recommendation
+                doc["id"] = existing_rec["id"]  # Keep the same ID
+                doc["created_at"] = existing_rec.get("created_at", datetime.utcnow())  # Keep original creation time
+
+                self.ai_decisions_collection.update_one(
+                    {"id": existing_rec["id"]},
+                    {"$set": doc}
+                )
+
+                print(f"Updated existing recommendation ID {existing_rec['id']} for {doc['app_name']} → {doc['dest_ip']}")
+                return existing_rec["id"]
+            else:
+                # Create new recommendation
+                # Use app_name and dest_ip for ID generation to ensure consistency
+                id_base = {"app_name": doc["app_name"], "dest_ip": doc["dest_ip"]}
+                doc["id"] = self._get_unique_id(id_base, self.ai_decisions_collection)
+                doc["created_at"] = datetime.utcnow()
+
+                self.ai_decisions_collection.insert_one(doc)
+                print(f"Created new recommendation ID {doc['id']} for {doc['app_name']} → {doc['dest_ip']}")
+                return doc["id"]
+
+        except Exception as e:
+            self.logger.error(f"Error storing AI recommendation: {e}")
+            return None
+
+    def get_ai_recommendation(self, recommendation_id: int) -> Optional[Dict]:
+        """Get AI recommendation by ID"""
+        try:
+            return self.ai_decisions_collection.find_one({"id": recommendation_id})
+        except Exception as e:
+            self.logger.error(f"Error fetching AI recommendation: {e}")
+            return None 
+
+    def get_active_ai_recommendations(self) -> List[Dict]:
+        """Get all active AI recommendations"""
+        try:
+            return list(self.ai_decisions_collection.find(
+                {"active": True},
+                sort=[("confidence", -1)]
+            ))
+        except Exception as e:
+            self.logger.error(f"Error fetching active AI recommendations: {e}")
+            return []
