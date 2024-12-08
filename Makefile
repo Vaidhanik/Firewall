@@ -214,5 +214,6 @@ fw-win-rm:
 #=================================================================#
 
 cleanup:
+	python $(FIREWALL_DIR)/auto.py
 	sudo rm -rf $(FIREWALL_DIR)/logs
 	sudo rm -rf $(FIREWALL_DIR)/src/monitor/logs

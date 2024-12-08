@@ -502,3 +502,80 @@ class NetworkController:
         except Exception as e:
             print(f"\nWarning: Cleanup encountered errors: {e}")
             print("Some resources may need manual cleanup")
+
+    ##############
+    ## AI STUFF ##
+    ##############
+    
+    def get_ai_decisions(self, limit: int = 100) -> list:
+        """Get recent AI decisions with error handling"""
+        try:
+            print("Debug: Fetching decisions from MongoDB...")
+            decisions = list(self.interceptor.ai_service.get_recent_decisions(limit))
+            print(f"Debug: Found {len(decisions)} decisions")
+            return decisions
+        except Exception as e:
+            print(f"Error fetching AI decisions: {e}")
+            return []
+
+    def implement_ai_recommendation(self, recommendation_id: int) -> bool:
+        """Implement AI recommendation as blocking rule"""
+        try:
+            # Get recommendation
+            recommendation = self.interceptor.db.get_ai_recommendation(recommendation_id)
+            if not recommendation:
+                print(f"AI recommendation {recommendation_id} not found")
+                return False
+
+            app_name = recommendation["app_name"]
+            target_ip = recommendation["dest_ip"]
+    
+            # Find matching apps
+            print(f"\nSearching for installed apps matching: {app_name}")
+            matching_apps = self.search_installed_apps(app_name)
+            print(f"Found {len(matching_apps)} matching apps: {matching_apps}")
+
+            if not matching_apps:
+                print(f"No matching application found for {app_name}")
+                return False
+
+            # Take the first match
+            selected_app = matching_apps[0]
+            print(f"\nSelected app for blocking: {selected_app}")
+
+            # Debug installed apps
+            print(f"\nInstalled apps check:")
+            print(f"Total installed apps: {len(self.installed_apps)}")
+            print(f"Is selected app in installed_apps? {selected_app in self.installed_apps}")
+
+            # Use existing block_app_network with debugging
+            print(f"\nAttempting to block network access...")
+            print(f"App: {selected_app}")
+            print(f"Target: {target_ip}")
+
+            if self.block_app_network(selected_app, target_ip):
+                print("\nBlocking successful, updating recommendation status...")
+
+                # Update recommendation status
+                self.interceptor.db.ai_decisions_collection.update_one(
+                    {"id": recommendation_id},
+                    {
+                        "$set": {
+                            "active": True,
+                            "implemented": True,
+                            "implementation_time": datetime.utcnow().isoformat(),
+                        }
+                    }
+                )
+                print(f"Successfully implemented recommendation for {selected_app} → {target_ip}")
+                return True
+            else:
+                print("\nBlock_app_network call failed")
+                return False
+
+        except Exception as e:
+            print(f"Error implementing AI recommendation: {e}")
+            print(f"Error type: {type(e)}")
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}")
+            return False

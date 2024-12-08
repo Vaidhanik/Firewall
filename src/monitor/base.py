@@ -255,83 +255,6 @@ class NetworkMonitorBase(ABC):
         except Exception as e:
             print(f"Error writing to connection log: {e}")
 
-    # def update_stats(self, connections):
-    #     """Update statistics with email tracking"""
-    #     timestamp = datetime.datetime.now().isoformat()
-    #     app_stats = defaultdict(lambda: {
-    #         'connections': set(),
-    #         'destinations': set(),
-    #         'services': set(),
-    #         'email_connections': 0
-    #     })
-
-    #     current_apps = set()
-    #     for conn in connections:
-    #         if conn['state'] == 'ESTABLISHED' or conn['protocol'] == 'udp':
-    #             app = conn['program']
-    #             current_apps.add(app)
-    #             domain = self.resolve_domain(conn['remote_addr'])
-    #             service_type = self.get_service_type(domain, conn['remote_port'])
-                
-    #             app_stats[app]['connections'].add(f"{conn['remote_addr']}:{conn['remote_port']}")
-    #             app_stats[app]['destinations'].add(domain)
-    #             app_stats[app]['services'].add(service_type)
-                
-    #             if service_type.startswith('EMAIL'):
-    #                 app_stats[app]['email_connections'] += 1
-
-    #     # Check for new and stopped applications
-    #     new_apps = current_apps - self.active_apps
-    #     stopped_apps = self.active_apps - current_apps
-        
-    #     for app in new_apps:
-    #         print(f"\n[+] New application detected: {app}")
-    #         # Find the connection details for this app
-    #         for conn in connections:
-    #             if conn['program'] == app:
-    #                 # Check for email activity
-    #                 domain = self.resolve_domain(conn['remote_addr'])
-    #                 if self.get_service_type(domain, conn['remote_port']).startswith('EMAIL'):
-    #                     print(f"    └─ Email-related activity detected")
-                    
-    #                 # Get and display MAC addresses
-    #                 local_mac = self.get_mac_address(conn['local_addr'])
-    #                 remote_mac = self.get_mac_address(conn['remote_addr'])
-                    
-    #                 print(f"    └─ Local MAC: {local_mac or 'N/A'}")
-    #                 if remote_mac:
-    #                     print(f"    └─ Remote MAC: {remote_mac}")
-    #                 break  # Show MAC info only once per new app
-
-    #     for app in stopped_apps:
-    #         print(f"\n[-] Application stopped: {app}")
-
-    #     self.active_apps = current_apps
-
-    #     # Log statistics
-    #     with open(self.stats_file, 'a', newline='') as f:
-    #         writer = csv.DictWriter(f, fieldnames=self.stats_headers)
-            
-    #         for app, stats in app_stats.items():
-    #             row = {
-    #                 'timestamp': timestamp,
-    #                 'app_name': app,
-    #                 'total_connections': len(stats['connections']),
-    #                 'unique_destinations': len(stats['destinations']),
-    #                 'services_accessed': ','.join(stats['services']),
-    #                 'email_connections': stats['email_connections']
-    #             }
-    #             writer.writerow(row)
-    #             # MongoDB
-    #             if self.mongo_client:
-    #                 try:
-    #                     row['services_accessed'] = list(stats['services'])  # Convert set to list
-    #                     print(f"Inserting stats to MongoDB: {row}")  # Debug print
-    #                     self.stats_collection.insert_one(row)
-    #                 except Exception as e:
-    #                     print(f"Error writing to MongoDB stats collection: {e}")
-    #                     print(f"Row data that failed: {row}")
-
     def update_stats(self, connections):
         """Update statistics with email tracking"""
         timestamp = datetime.datetime.now().isoformat()
@@ -423,7 +346,8 @@ class NetworkMonitorBase(ABC):
             print(f"\n[-] Application stopped: {app}")
     
         self.active_apps = current_apps
-        def monitor(self):
+
+    def monitor(self):
             """Main monitoring loop"""
             print("\nNetwork Monitor Started")
             print(f"Logs directory: {self.logs_dir}")

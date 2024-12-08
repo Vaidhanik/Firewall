@@ -4,8 +4,10 @@ import hashlib
 import logging
 from datetime import datetime
 from pymongo import MongoClient
-from typing import List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional
+from monitor import NetworkMonitorBase
 
+import random
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -26,6 +28,10 @@ ATTEMPTS_MONGO_DB_HOST = os.environ.get('ATTEMPTS_MONGO_DB_HOST', 'localhost')
 ATTEMPTS_MONGO_DB_PORT = os.environ.get('ATTEMPTS_MONGO_DB_PORT', '27019')
 ATTEMPTS_MONGO_DB_USERNAME = os.environ.get('ATTEMPTS_MONGO_DB_USERNAME', 'mongoattemptsuser')
 ATTEMPTS_MONGO_DB_PASSWORD = os.environ.get('ATTEMPTS_MONGO_DB_PASSWORD', 'attemptspass')
+AI_MONGO_DB_HOST = os.environ.get('AI_MONGO_DB_HOST', 'localhost')
+AI_MONGO_DB_PORT = os.environ.get('AI_MONGO_DB_PORT', '27021')
+AI_MONGO_DB_USERNAME = os.environ.get('AI_MONGO_DB_USERNAME', 'mongoaiuser')
+AI_MONGO_DB_PASSWORD = os.environ.get('AI_MONGO_DB_PASSWORD', 'aipass')
 
 class DatabaseHandler:
     # def __init__(self, db_path: str = "interceptor.db"):
@@ -40,11 +46,43 @@ class DatabaseHandler:
         
         self.rules_client = None
         self.attempts_client = None
+
         self.rules_db = None
         self.attempts_db = None
+
+        #############MONITOR
+        self.mongo_host = os.environ.get('MONITOR_MONGO_HOST', 'localhost')
+        self.mongo_port = int(os.environ.get('MONITOR_MONGO_PORT', '27020'))
+        self.mongo_user = os.environ.get('MONITOR_MONGO_ROOT_USERNAME', 'mongouser')
+        self.mongo_pass = os.environ.get('MONITOR_MONGO_ROOT_PASSWORD', 'mongopass')
+        self.mongo_client = MongoClient(
+               host=self.mongo_host,
+               port=self.mongo_port,
+               username=self.mongo_user,
+               password=self.mongo_pass
+           )
+        self.db = self.mongo_client.network_monitor
+        self.connections_collection = self.db.connections
+        #############
         
         self._connect_with_retry()
         self.setup_database()
+
+        # AI DB
+        self.ai_decisions_collection = self.rules_db.ai_decisions
+        self._setup_ai_indexes()
+
+    def _setup_ai_indexes(self):
+        """Setup indexes for AI decisions"""
+        try:
+            self.ai_decisions_collection.create_index([
+                ("source_ip", 1),
+                ("dest_ip", 1),
+                ("timestamp", -1)
+            ])
+            self.ai_decisions_collection.create_index([("program", 1)])
+        except Exception as e:
+            self.logger.error(f"Error setting up AI indexes: {e}")
 
     def _generate_id(self, data: dict) -> int:
         """Generate unique ID from data using SHA256"""
@@ -148,8 +186,7 @@ class DatabaseHandler:
             self.attempts_db.blocked_attempts.create_index([("timestamp", -1)])
         except Exception as e:
             self.logger.error(f"Database setup error: {e}")
-
-            
+        
     def add_rule(self, app_name: str, target: str, target_type: str, resolved_ips: List[str]) -> Optional[int]:
         """Add new rule to database"""
         # try:
@@ -170,7 +207,7 @@ class DatabaseHandler:
                 "target": target,
                 "target_type": target_type,
                 "resolved_ips": resolved_ips,
-                "created_at": datetime.utcnow(),
+                "created_at": datetime.now().isoformat(),
                 "active": True
             }
             rule["id"] = self._get_unique_id(rule, self.blocking_rules_collection)
@@ -255,7 +292,7 @@ class DatabaseHandler:
                 "source_ip": source_ip,
                 "target": target,
                 "details": details,
-                "timestamp": datetime.utcnow()
+                "timestamp": datetime.now().isoformat()
             }
             self.blocked_attempts_collection.insert_one(attempt)
         except Exception as e:
@@ -286,3 +323,241 @@ class DatabaseHandler:
         except Exception as e:
            self.logger.error(f"Database error updating IPs: {e}")
            return False
+
+    ##############
+    ## AI STUFF ##
+    ##############
+    def analyze_historical_connections(self, n_records: int = 1000) -> List[Dict]:
+        """
+        Analyze recent connections and recommend blocks
+        Returns list of recommended blocks with reasons
+        """
+        try:
+            print(f"\nAnalyzing last {n_records} connections...")
+
+            # Get recent connections from monitor DB
+            recent_connections = list(self.connections_collection.find(
+                {},
+                sort=[("timestamp", -1)],
+                limit=n_records
+            ))
+
+            print(f"Found {len(recent_connections)} connections to analyze")
+
+            # Print sample connection for debugging
+            if recent_connections:
+                print("\nSample connection data:")
+                print(f"Timestamp type: {type(recent_connections[0]['timestamp'])}")
+                print(f"Sample data: {recent_connections[0]}")
+
+            # Group by app and destination
+            app_connections = {}
+            for conn in recent_connections:
+                app_name = conn['app_name']
+                dest = conn['remote_addr']
+
+                if app_name not in app_connections:
+                    app_connections[app_name] = {}
+
+                if dest not in app_connections[app_name]:
+                    app_connections[app_name][dest] = []
+
+                app_connections[app_name][dest].append(conn)
+
+            print(f"\nFound {len(app_connections)} unique applications")
+
+            # Analyze patterns and generate recommendations
+            recommendations = []
+
+            for app_name, destinations in app_connections.items():
+                print(f"\nAnalyzing {app_name}: {len(destinations)} destinations")
+                for dest_ip, connections in destinations.items():
+                    analysis = self._analyze_connection_group(connections)
+
+                    # For now using simple rules, replace with AI model later
+                    should_block = (
+                        analysis['suspicious_ports'] or
+                        analysis['high_frequency'] or
+                        analysis['unusual_protocols']
+                    )
+
+                    if should_block:
+                        recommendations.append({
+                            "app_name": app_name,
+                            "dest_ip": dest_ip,
+                            "confidence": analysis['confidence'],
+                            "reason": analysis['reason'],
+                            "connection_count": len(connections),
+                            "analysis": analysis
+                        })
+
+            # STORAGE OF RULES
+            stored_recommendations = []
+            for rec in recommendations:
+                rec_id = self.store_ai_recommendation(rec)
+                if rec_id:
+                    rec['id'] = rec_id  # Add ID to recommendation
+                    stored_recommendations.append(rec)
+                    print(f"Stored recommendation ID: {rec_id} for {rec['app_name']} → {rec['dest_ip']}")
+
+            # Sort by confidence
+            recommendations.sort(key=lambda x: x['confidence'], reverse=True)
+            print(f"\nGenerated {len(recommendations)} recommendations")
+            return recommendations
+
+        except Exception as e:
+            self.logger.error(f"Error analyzing connections: {e}")
+            return []
+
+    """
+    MODELS
+    KE
+    LIYE
+    UPDATE
+    BELOW
+    """
+    def _analyze_connection_group(self, connections: List[Dict]) -> Dict:
+        """Analyze a group of connections for suspicious patterns"""
+        try:
+            # Count unique ports
+            ports = set(conn['remote_port'] for conn in connections)
+
+            # Calculate frequency by converting timestamps to datetime
+            timestamps = []
+            for conn in connections:
+                # Handle string timestamp
+                if isinstance(conn['timestamp'], str):
+                    ts = datetime.fromisoformat(conn['timestamp'].replace('Z', '+00:00'))
+                elif isinstance(conn['timestamp'], datetime):
+                    ts = conn['timestamp']
+                else:
+                    continue
+                timestamps.append(ts)
+
+            if len(timestamps) >= 2:
+                min_time = min(timestamps)
+                max_time = max(timestamps)
+                time_diff = (max_time - min_time).total_seconds()
+                frequency = len(connections) / time_diff if time_diff > 0 else 0
+            else:
+                frequency = 0
+
+            # Check protocols
+            protocols = set(conn['protocol'] for conn in connections)
+
+            # Analyze patterns
+            suspicious_ports = len([p for p in ports if p not in [80, 443, 53, 22, 25]]) > 0
+            high_frequency = frequency > 10  # More than 10 connections per second
+            unusual_protocols = any(proto not in ['tcp', 'udp'] for proto in protocols)
+
+            # Calculate confidence score (0-1)
+            confidence = 0.0
+            reasons = []
+
+            if suspicious_ports:
+                confidence += 0.4
+                reasons.append(f"Unusual ports: {', '.join(map(str, ports))}")
+
+            if high_frequency:
+                confidence += 0.3
+                reasons.append(f"High frequency: {frequency:.2f} conn/sec")
+
+            if unusual_protocols:
+                confidence += 0.3
+                reasons.append(f"Unusual protocols: {', '.join(protocols)}")
+
+            return {
+                "suspicious_ports": suspicious_ports,
+                "high_frequency": high_frequency,
+                "unusual_protocols": unusual_protocols,
+                "confidence": min(confidence, 1.0),
+                "reason": " | ".join(reasons) if reasons else "No specific concerns",
+                "metrics": {
+                    "unique_ports": len(ports),
+                    "frequency": frequency,
+                    "protocols": list(protocols)
+                }
+            }
+
+        except Exception as e:
+            self.logger.error(f"Error in connection analysis: {e}")
+            self.logger.error(f"Connection data: {connections[0] if connections else 'No data'}")
+            return {
+                "suspicious_ports": False,
+                "high_frequency": False,
+                "unusual_protocols": False,
+                "confidence": 0.0,
+                "reason": "Analysis error",
+                "metrics": {}
+            }
+        
+    def store_ai_recommendation(self, recommendation: Dict) -> Optional[int]:
+        """Store AI recommendation with unique ID"""
+        try:
+            # First check if recommendation already exists for this app->dest pair
+            existing_rec = self.ai_decisions_collection.find_one({
+                "app_name": recommendation["app_name"],
+                "dest_ip": recommendation["dest_ip"]
+            })
+
+            doc = {
+                "app_name": recommendation["app_name"],
+                "dest_ip": recommendation["dest_ip"],
+                "confidence": recommendation["confidence"],
+                "reason": recommendation["reason"],
+                "connection_count": recommendation["connection_count"],
+                "analysis": recommendation["analysis"],
+                "updated_at": datetime.utcnow().isoformat(),
+                "active": False,  # Start as False since it's just a recommendation
+                "implemented": False  # Track if it's been implemented
+            }
+    
+            try:
+                if existing_rec:
+                    doc["id"] = existing_rec["id"]
+                    doc["created_at"] = existing_rec.get("created_at", datetime.utcnow().isoformat())
+
+                    result = self.ai_decisions_collection.update_one(
+                        {"id": existing_rec["id"]},
+                        {"$set": doc}
+                    )
+                    print(f"Updated recommendation ID {existing_rec['id']}")
+                    return existing_rec["id"]
+                else:
+                    id_base = {"app_name": doc["app_name"], "dest_ip": doc["dest_ip"]}
+                    new_id = self._get_unique_id(id_base, self.ai_decisions_collection)
+                    doc["id"] = new_id
+                    doc["created_at"] = datetime.utcnow().isoformat()
+                    print(f"Generated new ID: {new_id}")
+
+                    result = self.ai_decisions_collection.insert_one(doc)
+                    print(f"Inserted with MongoDB _id: {result.inserted_id}")
+
+                    return new_id
+
+            except Exception as e:
+                print(f"MongoDB operation failed: {e}")
+                raise
+
+        except Exception as e:
+            self.logger.error(f"Error storing AI recommendation: {e}")
+            return None
+    
+    def get_ai_recommendation(self, recommendation_id: int) -> Optional[Dict]:
+        """Get AI recommendation by ID"""
+        try:
+            return self.ai_decisions_collection.find_one({"id": recommendation_id})
+        except Exception as e:
+            self.logger.error(f"Error fetching AI recommendation: {e}")
+            return None 
+
+    def get_inactive_ai_recommendations(self) -> List[Dict]:
+        """Get all active AI recommendations"""
+        try:
+            return list(self.ai_decisions_collection.find(
+                {"active": False},
+                sort=[("confidence", -1)]
+            ))
+        except Exception as e:
+            self.logger.error(f"Error fetching active AI recommendations: {e}")
+            return []

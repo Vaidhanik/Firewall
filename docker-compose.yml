@@ -73,6 +73,19 @@ services:
       - mongo_monitor:/data/db
     networks:
       - vaidhanik
+  
+  mongo-ai:
+    image: mongo:latest
+    container_name: network_ai_db
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=mongoaiuser
+      - MONGO_INITDB_ROOT_PASSWORD=aipass
+    ports:
+      - "27021:27017"
+    volumes:
+      - mongo_ai:/data/db
+    networks:
+      - vaidhanik
 
   mongo-express-rules:
     image: mongo-express
@@ -129,6 +142,8 @@ volumes:
   mongo_attempts:
     driver: local
   mongo_monitor:
+    driver: local
+  mongo_ai:
     driver: local
 
 networks:
