@@ -4,8 +4,10 @@ import hashlib
 import logging
 from datetime import datetime
 from pymongo import MongoClient
-from typing import List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional
+from monitor import NetworkMonitorBase
 
+import random
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -26,6 +28,10 @@ ATTEMPTS_MONGO_DB_HOST = os.environ.get('ATTEMPTS_MONGO_DB_HOST', 'localhost')
 ATTEMPTS_MONGO_DB_PORT = os.environ.get('ATTEMPTS_MONGO_DB_PORT', '27019')
 ATTEMPTS_MONGO_DB_USERNAME = os.environ.get('ATTEMPTS_MONGO_DB_USERNAME', 'mongoattemptsuser')
 ATTEMPTS_MONGO_DB_PASSWORD = os.environ.get('ATTEMPTS_MONGO_DB_PASSWORD', 'attemptspass')
+AI_MONGO_DB_HOST = os.environ.get('AI_MONGO_DB_HOST', 'localhost')
+AI_MONGO_DB_PORT = os.environ.get('AI_MONGO_DB_PORT', '27021')
+AI_MONGO_DB_USERNAME = os.environ.get('AI_MONGO_DB_USERNAME', 'mongoaiuser')
+AI_MONGO_DB_PASSWORD = os.environ.get('AI_MONGO_DB_PASSWORD', 'aipass')
 
 class DatabaseHandler:
     # def __init__(self, db_path: str = "interceptor.db"):
@@ -40,11 +46,43 @@ class DatabaseHandler:
         
         self.rules_client = None
         self.attempts_client = None
+
         self.rules_db = None
         self.attempts_db = None
+
+        #############MONITOR
+        self.mongo_host = os.environ.get('MONITOR_MONGO_HOST', 'localhost')
+        self.mongo_port = int(os.environ.get('MONITOR_MONGO_PORT', '27020'))
+        self.mongo_user = os.environ.get('MONITOR_MONGO_ROOT_USERNAME', 'mongouser')
+        self.mongo_pass = os.environ.get('MONITOR_MONGO_ROOT_PASSWORD', 'mongopass')
+        self.mongo_client = MongoClient(
+               host=self.mongo_host,
+               port=self.mongo_port,
+               username=self.mongo_user,
+               password=self.mongo_pass
+           )
+        self.db = self.mongo_client.network_monitor
+        self.connections_collection = self.db.connections
+        #############
         
         self._connect_with_retry()
         self.setup_database()
+
+        # AI DB
+        self.ai_decisions_collection = self.rules_db.ai_decisions
+        self._setup_ai_indexes()
+
+    def _setup_ai_indexes(self):
+        """Setup indexes for AI decisions"""
+        try:
+            self.ai_decisions_collection.create_index([
+                ("source_ip", 1),
+                ("dest_ip", 1),
+                ("timestamp", -1)
+            ])
+            self.ai_decisions_collection.create_index([("program", 1)])
+        except Exception as e:
+            self.logger.error(f"Error setting up AI indexes: {e}")
 
     def _generate_id(self, data: dict) -> int:
         """Generate unique ID from data using SHA256"""
@@ -148,8 +186,7 @@ class DatabaseHandler:
             self.attempts_db.blocked_attempts.create_index([("timestamp", -1)])
         except Exception as e:
             self.logger.error(f"Database setup error: {e}")
-
-            
+        
     def add_rule(self, app_name: str, target: str, target_type: str, resolved_ips: List[str]) -> Optional[int]:
         """Add new rule to database"""
         # try:
@@ -286,3 +323,493 @@ class DatabaseHandler:
         except Exception as e:
            self.logger.error(f"Database error updating IPs: {e}")
            return False
+
+    ##############
+    ## AI STUFF ##
+    ##############
+
+    # def store_ai_decision(self, connection: dict, allowed: bool) -> bool:
+    #     """Store AI decision in MongoDB"""
+    #     try:
+    #         doc = {
+    #             "source_ip": connection['local_addr'],
+    #             "source_port": connection['local_port'],
+    #             "dest_ip": connection['remote_addr'],
+    #             "dest_port": connection['remote_port'],
+    #             "protocol": connection['protocol'],
+    #             "program": connection['program'],
+    #             "allowed": allowed,
+    #             "timestamp": datetime.now().isoformat(),
+    #         }
+    #         self.ai_decisions_collection.insert_one(doc)
+    #         return True
+    #     except Exception as e:
+    #         self.logger.error(f"Error storing AI decision: {e}")
+    #         return False
+        
+    # def get_recent_ai_decisions(self, limit: int = 100) -> list:
+    #     """Get recent AI decisions"""
+    #     try:
+    #         return list(self.ai_decisions_collection.find(
+    #             {},
+    #             sort=[("timestamp", -1)],
+    #             limit=limit
+    #         ))
+    #     except Exception as e:
+    #         self.logger.error(f"Error fetching AI decisions: {e}")
+    #         return []
+        
+    
+    # def check_ai_allowed(self, connection: dict) -> Tuple[bool, str]:
+    #     """Check if connection should be allowed based on historical data"""
+    #     try:
+    #         # Get connection history for this app/IP combination
+    #         history = list(self.connections_collection.find({
+    #             "app_name": connection['program'],
+    #             "remote_addr": connection['remote_addr']
+    #         }).sort("timestamp", -1).limit(100))
+
+    #         print(f"\nAnalyzing connection pattern:")
+    #         print(f"  └─ Found {len(history)} historical connections")
+
+    #         # Analyze connection patterns
+    #         pattern = self._analyze_connection_history(connection, history)
+            
+    #         # TODO: Replace with actual model
+    #         # For now, using random but considering history
+    #         if len(history) > 0:
+    #             # Make decision based on historical data
+    #             allowed = random.choice([True, False])
+    #         else:
+    #             # No history, allow by default
+    #             allowed = True
+
+    #         # Store decision with pattern analysis
+    #         doc = {
+    #             "source_ip": connection['local_addr'],
+    #             "source_port": connection['local_port'],
+    #             "dest_ip": connection['remote_addr'],
+    #             "dest_port": connection['remote_port'],
+    #             "protocol": connection['protocol'],
+    #             "program": connection['program'],
+    #             "allowed": allowed,
+    #             "pattern_analysis": pattern,
+    #             "timestamp": datetime.utcnow()
+    #         }
+    #         self.ai_decisions_collection.insert_one(doc)
+
+    #         reason = (f"Based on {len(history)} historical connections. "
+    #                  f"Unique destinations: {pattern['unique_destinations']}")
+    #         return allowed, reason
+
+    #     except Exception as e:
+    #         self.logger.error(f"Error in AI decision: {e}")
+    #         return True, "Error analyzing connection data"
+        
+    # def check_ai_allowed(self, connection: dict) -> Tuple[bool, str]:
+    #     """Check if connection should be allowed based on historical data"""
+    #     try:
+    #         print(f"\nDebug: Checking connection for {connection['program']} → {connection['remote_addr']}:{connection['remote_port']}")
+            
+    #         # Get historical connections
+    #         history = list(self.connections_collection.find({
+    #             "app_name": connection['program'],
+    #             "remote_addr": connection['remote_addr']
+    #         }).sort("timestamp", -1).limit(100))
+            
+    #         print(f"Debug: Found {len(history)} historical connections")
+    
+    #         # Make decision
+    #         # For now using random but with weighted probability based on history
+    #         import random
+    #         if len(history) > 0:
+    #             # More history = more likely to allow
+    #             probability_allow = min(0.8, len(history) / 100)
+    #             allowed = random.random() < probability_allow
+    #         else:
+    #             # No history = 50/50 chance
+    #             allowed = random.choice([True, False])
+    
+    #         # Store decision with details
+    #         decision_doc = {
+    #             "source_ip": connection['local_addr'],
+    #             "source_port": connection['local_port'],
+    #             "dest_ip": connection['remote_addr'],
+    #             "dest_port": connection['remote_port'],
+    #             "protocol": connection['protocol'],
+    #             "program": connection['program'],
+    #             "allowed": allowed,
+    #             "history_count": len(history),
+    #             "timestamp": datetime.utcnow()
+    #         }
+            
+    #         print(f"Debug: Storing decision: {'ALLOW' if allowed else 'BLOCK'}")
+    #         result = self.ai_decisions_collection.insert_one(decision_doc)
+    #         print(f"Debug: Decision stored with ID: {result.inserted_id}")
+    
+    #         return allowed, f"Based on {len(history)} historical connections"
+    
+    #     except Exception as e:
+    #         print(f"Debug: Error in AI decision: {e}")
+    #         return True, "Error in decision making"
+
+    # def get_recent_ai_decisions(self, limit: int = 100) -> list:
+    #     """Get recent AI decisions with connection data"""
+    #     try:
+    #         decisions = list(self.ai_decisions_collection.find(
+    #             {},
+    #             sort=[("timestamp", -1)],
+    #             limit=limit
+    #         ))
+
+    #         # Enrich with connection history
+    #         for decision in decisions:
+    #             history = list(self.connections_collection.find({
+    #                 "app_name": decision['program'],
+    #                 "remote_addr": decision['dest_ip']
+    #             }).sort("timestamp", -1).limit(5))
+                
+    #             decision['recent_connections'] = len(history)
+    #             decision['connection_history'] = history
+
+    #         return decisions
+
+    #     except Exception as e:
+    #         self.logger.error(f"Error fetching decisions: {e}")
+    #         return []
+    # def get_recent_ai_decisions(self, limit: int = 100) -> list:
+    #     """Get recent AI decisions"""
+    #     try:
+    #         print("\nDebug: Fetching recent AI decisions")
+    #         decisions = list(self.ai_decisions_collection.find(
+    #             {},
+    #             sort=[("timestamp", -1)],
+    #             limit=limit
+    #         ))
+    #         print(f"Debug: Found {len(decisions)} decisions")
+    #         return decisions
+
+    #     except Exception as e:
+    #         print(f"Debug: Error fetching decisions: {e}")
+    #         return []
+
+    # def analyze_connection_pattern(self, connection: dict) -> dict:
+    #     """Analyze a connection pattern for suspicious behavior"""
+    #     try:
+    #         # Get recent history for this source IP
+    #         source_history = self.get_connection_history({
+    #             "source.ip": connection['local_addr']
+    #         })
+
+    #         # Get recent history for this destination
+    #         dest_history = self.get_connection_history({
+    #             "destination.ip": connection['remote_addr']
+    #         })
+
+    #         return {
+    #             "source_connections": len(source_history),
+    #             "dest_connections": len(dest_history),
+    #             "recent_blocks": sum(1 for x in source_history if not x['allowed']),
+    #             "common_ports": list(set(x['destination']['port'] for x in source_history))
+    #         }
+
+    #     except Exception as e:
+    #         self.logger.error(f"Error analyzing connection pattern: {e}")
+    #         return {}
+
+    # def _analyze_connection_history(self, current: dict, history: List[dict]) -> dict:
+    #     """Analyze historical connections for patterns"""
+    #     try:
+    #         destinations = set()
+    #         ports = set()
+    #         service_types = set()
+
+    #         for conn in history:
+    #             destinations.add(conn['remote_addr'])
+    #             ports.add(conn['remote_port'])
+    #             if 'service_type' in conn:
+    #                 service_types.add(conn['service_type'])
+
+    #         return {
+    #             "unique_destinations": len(destinations),
+    #             "common_ports": list(ports),
+    #             "service_types": list(service_types),
+    #             "total_connections": len(history)
+    #         }
+
+    #     except Exception as e:
+    #         self.logger.error(f"Error analyzing history: {e}")
+    #         return {}
+        
+    def analyze_historical_connections(self, n_records: int = 1000) -> List[Dict]:
+        """
+        Analyze recent connections and recommend blocks
+        Returns list of recommended blocks with reasons
+        """
+        try:
+            print(f"\nAnalyzing last {n_records} connections...")
+
+            # Get recent connections from monitor DB
+            recent_connections = list(self.connections_collection.find(
+                {},
+                sort=[("timestamp", -1)],
+                limit=n_records
+            ))
+
+            print(f"Found {len(recent_connections)} connections to analyze")
+
+            # Group by app and destination
+            app_connections = {}
+            for conn in recent_connections:
+                app_name = conn['app_name']
+                dest = conn['remote_addr']
+
+                if app_name not in app_connections:
+                    app_connections[app_name] = {}
+
+                if dest not in app_connections[app_name]:
+                    app_connections[app_name][dest] = []
+
+                app_connections[app_name][dest].append(conn)
+
+            # Analyze patterns and generate recommendations
+            recommendations = []
+
+            for app_name, destinations in app_connections.items():
+                for dest_ip, connections in destinations.items():
+                    analysis = self._analyze_connection_group(connections)
+
+                    # For now using simple rules, replace with AI model later
+                    should_block = (
+                        analysis['suspicious_ports'] or
+                        analysis['high_frequency'] or
+                        analysis['unusual_protocols']
+                    )
+
+                    if should_block:
+                        recommendations.append({
+                            "app_name": app_name,
+                            "dest_ip": dest_ip,
+                            "confidence": analysis['confidence'],
+                            "reason": analysis['reason'],
+                            "connection_count": len(connections),
+                            "analysis": analysis
+                        })
+
+            # Sort by confidence
+            recommendations.sort(key=lambda x: x['confidence'], reverse=True)
+            return recommendations
+
+        except Exception as e:
+            self.logger.error(f"Error analyzing connections: {e}")
+            return []
+
+    # def _analyze_connection_group(self, connections: List[Dict]) -> Dict:
+    #     """Analyze a group of connections for suspicious patterns"""
+    #     try:
+    #         # Count unique ports
+    #         ports = set(conn['remote_port'] for conn in connections)
+
+    #         # Calculate frequency
+    #         timestamps = [conn['timestamp'] for conn in connections]
+    #         if len(timestamps) >= 2:
+    #             time_diff = max(timestamps) - min(timestamps)
+    #             frequency = len(connections) / time_diff.total_seconds() if time_diff.seconds > 0 else 0
+    #         else:
+    #             frequency = 0
+
+    #         # Check protocols
+    #         protocols = set(conn['protocol'] for conn in connections)
+
+    #         # Analyze patterns
+    #         suspicious_ports = any(port not in [80, 443, 53] for port in ports)
+    #         high_frequency = frequency > 10  # More than 10 connections per second
+    #         unusual_protocols = any(proto not in ['tcp', 'udp'] for proto in protocols)
+
+    #         # Calculate confidence score (0-1)
+    #         confidence = 0.0
+    #         reasons = []
+
+    #         if suspicious_ports:
+    #             confidence += 0.4
+    #             reasons.append(f"Unusual ports: {', '.join(map(str, ports))}")
+
+    #         if high_frequency:
+    #             confidence += 0.3
+    #             reasons.append(f"High frequency: {frequency:.2f} conn/sec")
+
+    #         if unusual_protocols:
+    #             confidence += 0.3
+    #             reasons.append(f"Unusual protocols: {', '.join(protocols)}")
+
+    #         return {
+    #             "suspicious_ports": suspicious_ports,
+    #             "high_frequency": high_frequency,
+    #             "unusual_protocols": unusual_protocols,
+    #             "confidence": min(confidence, 1.0),
+    #             "reason": " | ".join(reasons) if reasons else "No specific concerns",
+    #             "metrics": {
+    #                 "unique_ports": len(ports),
+    #                 "frequency": frequency,
+    #                 "protocols": list(protocols)
+    #             }
+    #         }
+
+    #     except Exception as e:
+    #         self.logger.error(f"Error in connection analysis: {e}")
+    #         return {
+    #             "suspicious_ports": False,
+    #             "high_frequency": False,
+    #             "unusual_protocols": False,
+    #             "confidence": 0.0,
+    #             "reason": "Analysis error",
+    #             "metrics": {}
+    #         }
+
+    def analyze_historical_connections(self, n_records: int = 1000) -> List[Dict]:
+        """
+        Analyze recent connections and recommend blocks
+        Returns list of recommended blocks with reasons
+        """
+        try:
+            print(f"\nAnalyzing last {n_records} connections...")
+
+            # Get recent connections from monitor DB
+            recent_connections = list(self.connections_collection.find(
+                {},
+                sort=[("timestamp", -1)],
+                limit=n_records
+            ))
+
+            print(f"Found {len(recent_connections)} connections to analyze")
+
+            # Print sample connection for debugging
+            if recent_connections:
+                print("\nSample connection data:")
+                print(f"Timestamp type: {type(recent_connections[0]['timestamp'])}")
+                print(f"Sample data: {recent_connections[0]}")
+
+            # Group by app and destination
+            app_connections = {}
+            for conn in recent_connections:
+                app_name = conn['app_name']
+                dest = conn['remote_addr']
+
+                if app_name not in app_connections:
+                    app_connections[app_name] = {}
+
+                if dest not in app_connections[app_name]:
+                    app_connections[app_name][dest] = []
+
+                app_connections[app_name][dest].append(conn)
+
+            print(f"\nFound {len(app_connections)} unique applications")
+
+            # Analyze patterns and generate recommendations
+            recommendations = []
+
+            for app_name, destinations in app_connections.items():
+                print(f"\nAnalyzing {app_name}: {len(destinations)} destinations")
+                for dest_ip, connections in destinations.items():
+                    analysis = self._analyze_connection_group(connections)
+
+                    # For now using simple rules, replace with AI model later
+                    should_block = (
+                        analysis['suspicious_ports'] or
+                        analysis['high_frequency'] or
+                        analysis['unusual_protocols']
+                    )
+
+                    if should_block:
+                        recommendations.append({
+                            "app_name": app_name,
+                            "dest_ip": dest_ip,
+                            "confidence": analysis['confidence'],
+                            "reason": analysis['reason'],
+                            "connection_count": len(connections),
+                            "analysis": analysis
+                        })
+
+            # Sort by confidence
+            recommendations.sort(key=lambda x: x['confidence'], reverse=True)
+            print(f"\nGenerated {len(recommendations)} recommendations")
+            return recommendations
+
+        except Exception as e:
+            self.logger.error(f"Error analyzing connections: {e}")
+            return []
+
+    def _analyze_connection_group(self, connections: List[Dict]) -> Dict:
+        """Analyze a group of connections for suspicious patterns"""
+        try:
+            # Count unique ports
+            ports = set(conn['remote_port'] for conn in connections)
+
+            # Calculate frequency by converting timestamps to datetime
+            timestamps = []
+            for conn in connections:
+                # Handle string timestamp
+                if isinstance(conn['timestamp'], str):
+                    ts = datetime.fromisoformat(conn['timestamp'].replace('Z', '+00:00'))
+                elif isinstance(conn['timestamp'], datetime):
+                    ts = conn['timestamp']
+                else:
+                    continue
+                timestamps.append(ts)
+
+            if len(timestamps) >= 2:
+                min_time = min(timestamps)
+                max_time = max(timestamps)
+                time_diff = (max_time - min_time).total_seconds()
+                frequency = len(connections) / time_diff if time_diff > 0 else 0
+            else:
+                frequency = 0
+
+            # Check protocols
+            protocols = set(conn['protocol'] for conn in connections)
+
+            # Analyze patterns
+            suspicious_ports = len([p for p in ports if p not in [80, 443, 53, 22, 25]]) > 0
+            high_frequency = frequency > 10  # More than 10 connections per second
+            unusual_protocols = any(proto not in ['tcp', 'udp'] for proto in protocols)
+
+            # Calculate confidence score (0-1)
+            confidence = 0.0
+            reasons = []
+
+            if suspicious_ports:
+                confidence += 0.4
+                reasons.append(f"Unusual ports: {', '.join(map(str, ports))}")
+
+            if high_frequency:
+                confidence += 0.3
+                reasons.append(f"High frequency: {frequency:.2f} conn/sec")
+
+            if unusual_protocols:
+                confidence += 0.3
+                reasons.append(f"Unusual protocols: {', '.join(protocols)}")
+
+            return {
+                "suspicious_ports": suspicious_ports,
+                "high_frequency": high_frequency,
+                "unusual_protocols": unusual_protocols,
+                "confidence": min(confidence, 1.0),
+                "reason": " | ".join(reasons) if reasons else "No specific concerns",
+                "metrics": {
+                    "unique_ports": len(ports),
+                    "frequency": frequency,
+                    "protocols": list(protocols)
+                }
+            }
+
+        except Exception as e:
+            self.logger.error(f"Error in connection analysis: {e}")
+            self.logger.error(f"Connection data: {connections[0] if connections else 'No data'}")
+            return {
+                "suspicious_ports": False,
+                "high_frequency": False,
+                "unusual_protocols": False,
+                "confidence": 0.0,
+                "reason": "Analysis error",
+                "metrics": {}
+            }
