@@ -1,5 +1,5 @@
 from .controller import NetworkController
-from .menu import display_menu, handle_block_app, handle_view_rules, handle_view_logs
+from .menu import check_monitor_data, display_menu, handle_block_app, handle_view_rules, handle_view_logs, handle_analyze_connections
 
 def main():
     """Main application loop"""
@@ -59,6 +59,13 @@ def main():
                 print("\nCleaning up and exiting...")
                 controller.cleanup()
                 break
+            
+            elif choice == "11":
+                print("\nFetching AI Decission...")
+                handle_analyze_connections(controller)
+
+            elif choice == "12":
+                check_monitor_data(controller)
                 
             else:
                 print("\nInvalid option selected")
