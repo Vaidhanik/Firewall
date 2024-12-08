@@ -502,3 +502,18 @@ class NetworkController:
         except Exception as e:
             print(f"\nWarning: Cleanup encountered errors: {e}")
             print("Some resources may need manual cleanup")
+
+    ##############
+    ## AI STUFF ##
+    ##############
+    
+    def get_ai_decisions(self, limit: int = 100) -> list:
+        """Get recent AI decisions with error handling"""
+        try:
+            print("Debug: Fetching decisions from MongoDB...")
+            decisions = list(self.interceptor.ai_service.get_recent_decisions(limit))
+            print(f"Debug: Found {len(decisions)} decisions")
+            return decisions
+        except Exception as e:
+            print(f"Error fetching AI decisions: {e}")
+            return []
