@@ -517,3 +517,37 @@ class NetworkController:
         except Exception as e:
             print(f"Error fetching AI decisions: {e}")
             return []
+        
+    def implement_ai_recommendation(self, recommendation_id: int) -> bool:
+        """Implement AI recommendation as blocking rule"""
+        try:
+            # Get recommendation
+            recommendation = self.interceptor.db.get_ai_recommendation(recommendation_id)
+            if not recommendation:
+                print(f"AI recommendation {recommendation_id} not found")
+                return False
+
+            # Use existing block_app_network which handles all the firewall rules
+            if self.block_app_network(recommendation["app_name"], recommendation["dest_ip"]):
+                # Update AI recommendation to mark as implemented
+                self.interceptor.db.ai_decisions_collection.update_one(
+                    {"id": recommendation_id},
+                    {
+                        "$set": {
+                            "active": True,  # Keep consistent with storage format
+                            "updated_at": datetime.now().isoformat(),
+                            "implemented": True,  # New status field
+                            "implementation_time": datetime.now().isoformat(),  # Track when implemented
+                            "implementation_status": "success"  # Track implementation status
+                        }
+                    }
+                )
+                print(f"✓ Successfully implemented recommendation for {recommendation['app_name']} → {recommendation['dest_ip']}")
+                return True
+
+            print(f"✗ Failed to implement blocking rule for recommendation {recommendation_id}")
+            return False
+
+        except Exception as e:
+            print(f"Error implementing AI recommendation: {e}")
+            return False
