@@ -370,12 +370,9 @@ class DatabaseHandler:
             recommendations = []
 
             for app_name, destinations in app_connections.items():
-                print("1")
                 print(f"\nAnalyzing {app_name}: {len(destinations)} destinations")
                 for dest_ip, connections in destinations.items():
-                    print("2")
                     analysis = self._analyze_connection_group(connections)
-                    print("2.5")
 
                     # For now using simple rules, replace with AI model later
                     should_block = (
@@ -383,7 +380,6 @@ class DatabaseHandler:
                         analysis['high_frequency'] or
                         analysis['unusual_protocols']
                     )
-                    print("3")
 
                     if should_block:
                         recommendations.append({
@@ -394,21 +390,16 @@ class DatabaseHandler:
                             "connection_count": len(connections),
                             "analysis": analysis
                         })
-                    print("4")
 
             # STORAGE OF RULES
-            print("5")
             stored_recommendations = []
             for rec in recommendations:
-                print("6")
                 rec_id = self.store_ai_recommendation(rec)
                 if rec_id:
                     rec['id'] = rec_id  # Add ID to recommendation
                     stored_recommendations.append(rec)
                     print(f"Stored recommendation ID: {rec_id} for {rec['app_name']} → {rec['dest_ip']}")
-                print("7")
 
-            print("8")
             # Sort by confidence
             recommendations.sort(key=lambda x: x['confidence'], reverse=True)
             print(f"\nGenerated {len(recommendations)} recommendations")
