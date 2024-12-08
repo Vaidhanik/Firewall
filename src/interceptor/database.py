@@ -207,7 +207,7 @@ class DatabaseHandler:
                 "target": target,
                 "target_type": target_type,
                 "resolved_ips": resolved_ips,
-                "created_at": datetime.utcnow(),
+                "created_at": datetime.now().isoformat(),
                 "active": True
             }
             rule["id"] = self._get_unique_id(rule, self.blocking_rules_collection)
@@ -292,7 +292,7 @@ class DatabaseHandler:
                 "source_ip": source_ip,
                 "target": target,
                 "details": details,
-                "timestamp": datetime.utcnow()
+                "timestamp": datetime.now().isoformat()
             }
             self.blocked_attempts_collection.insert_one(attempt)
         except Exception as e:
@@ -328,68 +328,75 @@ class DatabaseHandler:
     ## AI STUFF ##
     ##############
         
-    def analyze_historical_connections(self, n_records: int = 1000) -> List[Dict]:
-        """
-        Analyze recent connections and recommend blocks
-        Returns list of recommended blocks with reasons
-        """
-        try:
-            print(f"\nAnalyzing last {n_records} connections...")
+    # def analyze_historical_connections(self, n_records: int = 1000) -> List[Dict]:
+    #     """
+    #     Analyze recent connections and recommend blocks
+    #     Returns list of recommended blocks with reasons
+    #     """
+    #     try:
+    #         print(f"\nAnalyzing last {n_records} connections...")
 
-            # Get recent connections from monitor DB
-            recent_connections = list(self.connections_collection.find(
-                {},
-                sort=[("timestamp", -1)],
-                limit=n_records
-            ))
+    #         # Get recent connections from monitor DB
+    #         recent_connections = list(self.connections_collection.find(
+    #             {},
+    #             sort=[("timestamp", -1)],
+    #             limit=n_records
+    #         ))
 
-            print(f"Found {len(recent_connections)} connections to analyze")
+    #         print(f"Found {len(recent_connections)} connections to analyze")
 
-            # Group by app and destination
-            app_connections = {}
-            for conn in recent_connections:
-                app_name = conn['app_name']
-                dest = conn['remote_addr']
+    #         # Group by app and destination
+    #         app_connections = {}
+    #         for conn in recent_connections:
+    #             app_name = conn['app_name']
+    #             dest = conn['remote_addr']
 
-                if app_name not in app_connections:
-                    app_connections[app_name] = {}
+    #             if app_name not in app_connections:
+    #                 app_connections[app_name] = {}
 
-                if dest not in app_connections[app_name]:
-                    app_connections[app_name][dest] = []
+    #             if dest not in app_connections[app_name]:
+    #                 app_connections[app_name][dest] = []
 
-                app_connections[app_name][dest].append(conn)
+    #             app_connections[app_name][dest].append(conn)
+            
+    #         print("2")
 
-            # Analyze patterns and generate recommendations
-            recommendations = []
+    #         # Analyze patterns and generate recommendations
+    #         recommendations = []
 
-            for app_name, destinations in app_connections.items():
-                for dest_ip, connections in destinations.items():
-                    analysis = self._analyze_connection_group(connections)
+    #         for app_name, destinations in app_connections.items():
+    #             print("3")
+    #             for dest_ip, connections in destinations.items():
+    #                 print("4")
+    #                 analysis = self._analyze_connection_group(connections)
 
-                    # For now using simple rules, replace with AI model later
-                    should_block = (
-                        analysis['suspicious_ports'] or
-                        analysis['high_frequency'] or
-                        analysis['unusual_protocols']
-                    )
+    #                 # For now using simple rules, replace with AI model later
+    #                 should_block = (
+    #                     analysis['suspicious_ports'] or
+    #                     analysis['high_frequency'] or
+    #                     analysis['unusual_protocols']
+    #                 )
 
-                    if should_block:
-                        recommendations.append({
-                            "app_name": app_name,
-                            "dest_ip": dest_ip,
-                            "confidence": analysis['confidence'],
-                            "reason": analysis['reason'],
-                            "connection_count": len(connections),
-                            "analysis": analysis
-                        })
+    #                 print("5")
+    #                 if should_block:
+    #                     recommendations.append({
+    #                         "app_name": app_name,
+    #                         "dest_ip": dest_ip,
+    #                         "confidence": analysis['confidence'],
+    #                         "reason": analysis['reason'],
+    #                         "connection_count": len(connections),
+    #                         "analysis": analysis
+    #                     })
+    #                 print("6")
 
-            # Sort by confidence
-            recommendations.sort(key=lambda x: x['confidence'], reverse=True)
-            return recommendations
+    #         # Sort by confidence
+    #         print("7")
+    #         recommendations.sort(key=lambda x: x['confidence'], reverse=True)
+    #         return recommendations
 
-        except Exception as e:
-            self.logger.error(f"Error analyzing connections: {e}")
-            return []
+    #     except Exception as e:
+    #         self.logger.error(f"Error analyzing connections: {e}")
+    #         return []
 
     def analyze_historical_connections(self, n_records: int = 1000) -> List[Dict]:
         """
@@ -434,9 +441,12 @@ class DatabaseHandler:
             recommendations = []
 
             for app_name, destinations in app_connections.items():
+                print("1")
                 print(f"\nAnalyzing {app_name}: {len(destinations)} destinations")
                 for dest_ip, connections in destinations.items():
+                    print("2")
                     analysis = self._analyze_connection_group(connections)
+                    print("2.5")
 
                     # For now using simple rules, replace with AI model later
                     should_block = (
@@ -444,6 +454,7 @@ class DatabaseHandler:
                         analysis['high_frequency'] or
                         analysis['unusual_protocols']
                     )
+                    print("3")
 
                     if should_block:
                         recommendations.append({
@@ -454,16 +465,21 @@ class DatabaseHandler:
                             "connection_count": len(connections),
                             "analysis": analysis
                         })
+                    print("4")
 
             # STORAGE OF RULES
+            print("5")
             stored_recommendations = []
             for rec in recommendations:
+                print("6")
                 rec_id = self.store_ai_recommendation(rec)
                 if rec_id:
                     rec['id'] = rec_id  # Add ID to recommendation
                     stored_recommendations.append(rec)
                     print(f"Stored recommendation ID: {rec_id} for {rec['app_name']} → {rec['dest_ip']}")
+                print("7")
 
+            print("8")
             # Sort by confidence
             recommendations.sort(key=lambda x: x['confidence'], reverse=True)
             print(f"\nGenerated {len(recommendations)} recommendations")
@@ -561,8 +577,7 @@ class DatabaseHandler:
             # First check if recommendation already exists for this app->dest pair
             existing_rec = self.ai_decisions_collection.find_one({
                 "app_name": recommendation["app_name"],
-                "dest_ip": recommendation["dest_ip"],
-                "active": True
+                "dest_ip": recommendation["dest_ip"]
             })
 
             doc = {
@@ -572,37 +587,42 @@ class DatabaseHandler:
                 "reason": recommendation["reason"],
                 "connection_count": recommendation["connection_count"],
                 "analysis": recommendation["analysis"],
-                "updated_at": datetime.now().isoformat(),
-                "active": True
+                "updated_at": datetime.utcnow().isoformat(),
+                "active": False,  # Start as False since it's just a recommendation
+                "implemented": False  # Track if it's been implemented
             }
+    
+            try:
+                if existing_rec:
+                    doc["id"] = existing_rec["id"]
+                    doc["created_at"] = existing_rec.get("created_at", datetime.utcnow().isoformat())
 
-            if existing_rec:
-                # Update existing recommendation
-                doc["id"] = existing_rec["id"]  # Keep the same ID
-                doc["created_at"] = existing_rec.get("created_at", datetime.utcnow())  # Keep original creation time
+                    result = self.ai_decisions_collection.update_one(
+                        {"id": existing_rec["id"]},
+                        {"$set": doc}
+                    )
+                    print(f"Updated recommendation ID {existing_rec['id']}")
+                    return existing_rec["id"]
+                else:
+                    id_base = {"app_name": doc["app_name"], "dest_ip": doc["dest_ip"]}
+                    new_id = self._get_unique_id(id_base, self.ai_decisions_collection)
+                    doc["id"] = new_id
+                    doc["created_at"] = datetime.utcnow().isoformat()
+                    print(f"Generated new ID: {new_id}")
 
-                self.ai_decisions_collection.update_one(
-                    {"id": existing_rec["id"]},
-                    {"$set": doc}
-                )
+                    result = self.ai_decisions_collection.insert_one(doc)
+                    print(f"Inserted with MongoDB _id: {result.inserted_id}")
 
-                print(f"Updated existing recommendation ID {existing_rec['id']} for {doc['app_name']} → {doc['dest_ip']}")
-                return existing_rec["id"]
-            else:
-                # Create new recommendation
-                # Use app_name and dest_ip for ID generation to ensure consistency
-                id_base = {"app_name": doc["app_name"], "dest_ip": doc["dest_ip"]}
-                doc["id"] = self._get_unique_id(id_base, self.ai_decisions_collection)
-                doc["created_at"] = datetime.utcnow()
+                    return new_id
 
-                self.ai_decisions_collection.insert_one(doc)
-                print(f"Created new recommendation ID {doc['id']} for {doc['app_name']} → {doc['dest_ip']}")
-                return doc["id"]
+            except Exception as e:
+                print(f"MongoDB operation failed: {e}")
+                raise
 
         except Exception as e:
             self.logger.error(f"Error storing AI recommendation: {e}")
             return None
-
+    
     def get_ai_recommendation(self, recommendation_id: int) -> Optional[Dict]:
         """Get AI recommendation by ID"""
         try:
@@ -611,11 +631,11 @@ class DatabaseHandler:
             self.logger.error(f"Error fetching AI recommendation: {e}")
             return None 
 
-    def get_active_ai_recommendations(self) -> List[Dict]:
+    def get_inactive_ai_recommendations(self) -> List[Dict]:
         """Get all active AI recommendations"""
         try:
             return list(self.ai_decisions_collection.find(
-                {"active": True},
+                {"active": False},
                 sort=[("confidence", -1)]
             ))
         except Exception as e:
