@@ -295,6 +295,51 @@ def block_app():
             'error': error_msg
         }), 500
     
+@app.route('/block-target', methods=["POST"])
+def block_target_on_an_app():
+    # Get JSON data from request
+    data = request.get_json()
+    
+    # Validate required parameters
+    if not data:
+        return jsonify({
+            "success": False,
+            "error": "No JSON data provided"
+        }), 403
+    
+    target = data.get('target')
+    app_name = data.get('app_name')
+    
+    # Validate both parameters are present
+    if not target or not app_name:
+        return jsonify({
+            "success": False,
+            "error": "Both 'target' and 'app_name' parameters are required"
+        }), 403
+    
+    try:
+        # Call controller to block the app
+        success = controller.block_app_network(app_name, target)
+        
+        if success:
+            return jsonify({
+                "success": True,
+                "message": f"Successfully blocked {app_name} from accessing {target}"
+            }), 203
+        else:
+            return jsonify({
+                "success": False,
+                "error": f"Failed to block {app_name} from accessing {target}"
+            }), 503
+            
+    except Exception as e:
+        logger.error(f"Failed to block {app_name} from accessing {target}: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": f"Internal server error occurred while blocking {app_name} from accessing {target}"
+        }), 503
+
+    
 @app.route('/unblock', methods=['POST'])
 def unblock_app():
     """Remove blocking rule"""
