@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 # os.chmod('/app_logs', 0o777)
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}})
 controller = NetworkController()
 
 def parse_duration(duration_str: str) -> timedelta:
@@ -353,6 +353,21 @@ def get_active_global_rules():
 @app.route('/get_global_rule', methods=["POST"])
 def get_global_rule():
     return controller.interceptor.db.get_global_rule()
+
+@app.route('/get_active_rules_apps/<app_name>', methods=["GET"])
+def get_active_rules_apps(app_name):
+    try:
+        # app_name = request.json.get('app_name')
+        rules = controller.interceptor.db.get_active_rules_apps(app_name)
+        return jsonify({
+            "status": "success",
+            "data": rules
+        }), 200
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
 
 @app.route('/get_active_global_rules_target_based/<target>', methods=["POST"])
 def get_active_global_rules_target_based(target = None):

@@ -24,6 +24,7 @@ class NetworkMonitorBase(ABC):
         self.active_apps = set()
         self.start_time = datetime.datetime.now()
         self.__init_db__()
+        self.__init_rules_db__()  # Add rules DB initialization
         # Service ports mapping
         self.service_ports = {
             # Email related ports
@@ -78,6 +79,27 @@ class NetworkMonitorBase(ABC):
             print(f"    {interface}: {mac}")
 
         self.initialize_logs()
+        
+    def __init_rules_db__(self):
+        """Initialize connection to rules database"""
+        self.rules_mongo_host = 'localhost'  
+        self.rules_mongo_port = 27018
+        self.rules_mongo_user = 'mongorulesuser'
+        self.rules_mongo_pass = 'rulespass'
+        
+        try:
+            self.rules_client = MongoClient(
+                host=self.rules_mongo_host,
+                port=self.rules_mongo_port,
+                username=self.rules_mongo_user,
+                password=self.rules_mongo_pass
+            )
+            self.rules_db = self.rules_client.network_rules
+            self.rules_collection = self.rules_db.rules
+            print("Successfully connected to Rules MongoDB")
+        except Exception as e:
+            print(f"Warning: Rules MongoDB connection failed: {e}")
+            self.rules_client = None
 
     def __init_db__(self):
         self.mongo_host = os.environ.get('MONITOR_MONGO_HOST', 'localhost')
@@ -109,7 +131,7 @@ class NetworkMonitorBase(ABC):
         self.conn_headers = [
             'timestamp', 'app_name', 'pid', 'protocol',
             'local_addr', 'local_port', 'local_mac', 'remote_addr', 'remote_port', 'remote_mac',
-            'domain', 'service', 'direction', 'state', 'service_type'
+            'domain', 'service', 'direction', 'state', 'service_type', 'banned'  # Added banned field
         ]
         
         # Application stats logs

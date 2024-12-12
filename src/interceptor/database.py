@@ -245,7 +245,25 @@ class DatabaseHandler:
         except Exception as e:
             self.logger.error(f"Database error getting rules: {e}")
             return []
-                
+    
+    def get_active_rules_apps(self, app_name: str = None) -> List[Tuple]:
+        try:
+            query = {"active": True}
+            if app_name:
+                query["app_name"] = app_name
+
+            rules = self.blocking_rules_collection.find(query).sort("created_at", -1)
+            return [(
+                rule["id"],
+                rule["app_name"],
+                rule["target"],
+                rule["target_type"],
+                ','.join(rule.get("resolved_ips", []))
+            ) for rule in rules]
+        except Exception as e:
+            self.logger.error(f"Database error getting rules: {e}")
+            return []
+
     def deactivate_rule(self, rule_id: int) -> bool:
         """Deactivate a rule"""
         # try:
