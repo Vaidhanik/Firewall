@@ -3,6 +3,7 @@ import logging
 import traceback
 import subprocess
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 from network_controller import NetworkController
 
 from pymongo import MongoClient
@@ -31,6 +32,7 @@ logger = logging.getLogger(__name__)
 # os.chmod('/app_logs', 0o777)
 
 app = Flask(__name__)
+CORS(app)
 controller = NetworkController()
 
 def parse_duration(duration_str: str) -> timedelta:
@@ -339,7 +341,34 @@ def block_target_on_an_app():
             "error": f"Internal server error occurred while blocking {app_name} from accessing {target}"
         }), 503
 
-    
+
+@app.route('/get_active_rules', methods=["POST"])
+def get_active_rules():
+    return controller.interceptor.db.get_active_rules()
+
+@app.route('/get_active_global_rules', methods=["POST"])
+def get_active_global_rules():
+    return controller.interceptor.db.get_active_global_rules()
+
+@app.route('/get_global_rule', methods=["POST"])
+def get_global_rule():
+    return controller.interceptor.db.get_global_rule()
+
+@app.route('/get_active_global_rules_target_based/<target>', methods=["POST"])
+def get_active_global_rules_target_based(target = None):
+    try:
+        rules = controller.interceptor.db.get_active_global_rules_target_based(target)
+        return jsonify({
+            "status": "success",
+            "data": rules,
+            "count": len(rules)
+        }), 200
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+        
 @app.route('/unblock', methods=['POST'])
 def unblock_app():
     """Remove blocking rule"""

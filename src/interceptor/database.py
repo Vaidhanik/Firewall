@@ -375,6 +375,33 @@ class DatabaseHandler:
         except Exception as e:
             self.logger.error(f"Database error getting global rules: {e}")
             return []
+    
+    def get_active_global_rules_target_based(self, target: str = None) -> List[Dict]:
+        """
+        Get active global blocking rules, optionally filtered by target
+
+        Args:
+            target (str, optional): Filter rules by specific target
+
+        Returns:
+            List[Dict]: Filtered active rules
+        """
+        try:
+            query = {"active": True}
+            if target:
+                query["target"] = target
+
+            rules = self.global_rules_collection.find(query)
+            return [{
+                "id": rule["id"],
+                "target": rule["target"],
+                "type": rule["target_type"],
+                "ips": rule.get("resolved_ips", []),
+                "created_at": rule.get("created_at")
+            } for rule in rules]
+        except Exception as e:
+            self.logger.error(f"Database error getting global rules: {e}")
+            return []
 
     def get_global_rule(self, rule_id: int) -> Optional[Tuple]:
         """Get details of a specific global rule"""
