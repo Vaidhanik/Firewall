@@ -1,7 +1,7 @@
 import sys
 import json
 import time
-import multiprocessing
+import threading
 from pathlib import Path
 from datetime import datetime
 
@@ -41,48 +41,112 @@ class NetworkController:
     def _init_monitor(self):
         """Initialize controller state"""
         # Monitor process state
-        self.monitor_process = None
-        self.monitor_running = multiprocessing.Value('b', False)
-        self.monitor_stats = multiprocessing.Manager().dict()
-        self.monitor_stats.update({
+        # self.monitor_thread = None
+        # self.monitor_running = multiprocessing.Value('b', False)
+        # self.monitor_stats = multiprocessing.Manager().dict()
+        # self.monitor_stats.update({
+        #     'total_connections': 0,
+        #     'blocked_attempts': 0,
+        #     'active_rules': 0,
+        #     'active_apps': 0,
+        #     'start_time': None,
+        #     'is_running': False
+        # })
+        self.monitor_thread = None
+        self.monitor_running = False
+        self.monitor_stats = {
             'total_connections': 0,
             'blocked_attempts': 0,
             'active_rules': 0,
             'active_apps': 0,
             'start_time': None,
             'is_running': False
-        })
+        }
 
-    def _run_monitor_process(self, running_flag, stats_dict):
-        """Running monitoring in separate process"""
+    # def _run_monitor_process(self, running_flag, stats_dict):
+    #     """Running monitoring in separate process"""
+    #     try:
+    #         # Set process start method for windows
+    #         if sys.platform == 'win32':
+    #             multiprocessing.freeze_support()
+
+    #         log_file = self.logs_dir / 'monitor.log'
+    #         self.logs_dir.mkdir(exist_ok=True)
+
+    #         print(f"Monitor process starting, logging to: {log_file}")
+
+    #         with open(log_file, 'a') as f:
+    #             f.write(f"\n=== Monitor started at {datetime.now().isoformat()} ===\n")
+    #             f.flush()
+
+    #             while running_flag.value:  # Check the flag at the start of each loop
+    #                 try:
+    #                     if not running_flag.value:  # Double check before heavy operations
+    #                         break
+
+    #                     connections = self.monitor.get_connections()
+    #                     self.update_app_state(connections, quiet=True)
+
+    #                     for conn in connections:
+    #                         stats_dict['total_connections'] += 1
+    #                         allowed, rule = self.check_connection_allowed(conn)
+
+    #                         if not allowed:
+    #                             stats_dict['blocked_attempts'] += 1
+    #                             f.write(
+    #                                 f"{datetime.now().isoformat()} - Blocked: {conn['program']} -> "
+    #                                 f"{conn['remote_addr']}:{conn['remote_port']}\n"
+    #                             )
+    #                             f.flush()
+
+    #                             self.interceptor.enforce_firewall_rule(
+    #                                 conn['program'],
+    #                                 conn['remote_addr']
+    #                             )
+    #                         else:
+    #                             self.monitor.log_connection(conn)
+
+    #                     stats_dict['active_apps'] = len(self.internal.active_apps)
+    #                     stats_dict['active_rules'] = len(self.get_active_blocks())
+    #                     time.sleep(1)  # Add sleep to reduce CPU usage and allow interrupts
+
+    #                 except Exception as e:
+    #                     f.write(f"\nError in monitor loop: {e}\n")
+    #                     f.flush()
+    #                     time.sleep(1)
+
+    #     except Exception as e:
+    #         with open(self.logs_dir / 'monitor_error.log', 'a') as f:
+    #             f.write(f"\nFatal error in monitor process: {e}\n")
+    #     finally:
+    #         # Cleanup when process stops
+    #         if hasattr(self.monitor, '_cleanup'):
+    #             self.monitor._cleanup()
+    #         print("Monitor process cleanup completed")
+
+    def _run_monitor_thread(self):
+        """Running monitoring in separate thread"""
         try:
-            # Set process start method for windows
-            if sys.platform == 'win32':
-                multiprocessing.freeze_support()
-
             log_file = self.logs_dir / 'monitor.log'
             self.logs_dir.mkdir(exist_ok=True)
 
-            print(f"Monitor process starting, logging to: {log_file}")
+            print(f"Monitor thread starting, logging to: {log_file}")
 
             with open(log_file, 'a') as f:
                 f.write(f"\n=== Monitor started at {datetime.now().isoformat()} ===\n")
                 f.flush()
 
-                while running_flag.value:  # Check the flag at the start of each loop
+                while self.monitor_running:  # Check the flag at the start of each loop
                     try:
-                        if not running_flag.value:  # Double check before heavy operations
-                            break
-
                         connections = self.monitor.get_connections()
                         self.update_app_state(connections, quiet=True)
 
                         for conn in connections:
-                            stats_dict['total_connections'] += 1
+                            self.monitor_stats['total_connections'] += 1
                             allowed, rule = self.check_connection_allowed(conn)
 
                             if not allowed:
-                                stats_dict['blocked_attempts'] += 1
+                                self.monitor_stats['blocked_attempts'] += 1
                                 f.write(
                                     f"{datetime.now().isoformat()} - Blocked: {conn['program']} -> "
                                     f"{conn['remote_addr']}:{conn['remote_port']}\n"
@@ -96,9 +160,9 @@ class NetworkController:
                             else:
                                 self.monitor.log_connection(conn)
 
-                        stats_dict['active_apps'] = len(self.internal.active_apps)
-                        stats_dict['active_rules'] = len(self.get_active_blocks())
-                        time.sleep(1)  # Add sleep to reduce CPU usage and allow interrupts
+                        self.monitor_stats['active_apps'] = len(self.internal.active_apps)
+                        self.monitor_stats['active_rules'] = len(self.get_active_blocks())
+                        time.sleep(1)
 
                     except Exception as e:
                         f.write(f"\nError in monitor loop: {e}\n")
@@ -107,12 +171,12 @@ class NetworkController:
 
         except Exception as e:
             with open(self.logs_dir / 'monitor_error.log', 'a') as f:
-                f.write(f"\nFatal error in monitor process: {e}\n")
+                f.write(f"\nFatal error in monitor thread: {e}\n")
         finally:
-            # Cleanup when process stops
+            # Cleanup when thread stops
             if hasattr(self.monitor, '_cleanup'):
                 self.monitor._cleanup()
-            print("Monitor process cleanup completed")
+            print("Monitor thread cleanup completed")
 
     def start_proxy(self) -> bool:
         """Start the proxy server"""
@@ -142,78 +206,130 @@ class NetworkController:
         """Stop the proxy server"""
         self.internal.stop_proxy()
 
+    # def stop_monitor(self):
+    #     """Safely stop the monitor process"""
+    #     if self.monitor_thread and self.monitor_thread.is_alive():
+    #         print("Stopping monitor process...")
+    #         try:
+    #             # Signal the process to stop
+    #             self.monitor_running.value = False
+
+    #             # Give it time to cleanup gracefully
+    #             for _ in range(10):  # Wait up to 2 seconds
+    #                 if not self.monitor_thread.is_alive():
+    #                     break
+    #                 time.sleep(0.2)
+
+    #             # If still alive after grace period
+    #             if self.monitor_thread.is_alive():
+    #                 print("Monitor process didn't stop gracefully, terminating...")
+    #                 self.monitor_thread.terminate()
+    #                 self.monitor_thread.join(2)  # Wait up to 2 seconds for termination
+
+    #                 # If still alive after terminate
+    #                 if self.monitor_thread.is_alive():
+    #                     print("Forcing monitor process to stop...")
+    #                     self.monitor_thread.kill()  # Force kill as last resort
+    #                     self.monitor_thread.join(1)
+
+    #         except Exception as e:
+    #             print(f"Error stopping monitor process: {e}")
+    #         finally:
+    #             self.monitor_stats['is_running'] = False
+    #             print("Monitor process stopped")
+    #             return True
+    #     return False
+
     def stop_monitor(self):
-        """Safely stop the monitor process"""
-        if self.monitor_process and self.monitor_process.is_alive():
-            print("Stopping monitor process...")
+        """Safely stop the monitor thread"""
+        if self.monitor_thread and self.monitor_thread.is_alive():
+            print("Stopping monitor thread...")
             try:
-                # Signal the process to stop
-                self.monitor_running.value = False
+                # Signal the thread to stop
+                self.monitor_running = False
 
                 # Give it time to cleanup gracefully
-                for _ in range(10):  # Wait up to 2 seconds
-                    if not self.monitor_process.is_alive():
-                        break
-                    time.sleep(0.2)
-
-                # If still alive after grace period
-                if self.monitor_process.is_alive():
-                    print("Monitor process didn't stop gracefully, terminating...")
-                    self.monitor_process.terminate()
-                    self.monitor_process.join(2)  # Wait up to 2 seconds for termination
-
-                    # If still alive after terminate
-                    if self.monitor_process.is_alive():
-                        print("Forcing monitor process to stop...")
-                        self.monitor_process.kill()  # Force kill as last resort
-                        self.monitor_process.join(1)
+                self.monitor_thread.join(timeout=5)
 
             except Exception as e:
-                print(f"Error stopping monitor process: {e}")
+                print(f"Error stopping monitor thread: {e}")
             finally:
                 self.monitor_stats['is_running'] = False
-                print("Monitor process stopped")
+                print("Monitor thread stopped")
                 return True
         return False
     
+    # def start_detached_monitor(self) -> bool:
+    #     """Start monitoring in a separate process"""
+    #     if self.monitor_thread and self.monitor_thread.is_alive():
+    #         print("\nMonitoring is already running!")
+    #         return False
+
+    #     try:
+    #         # Create a pipe for communication
+    #         self.monitor_running.value = True
+    #         self.monitor_stats['start_time'] = datetime.now().isoformat()
+    #         self.monitor_stats['is_running'] = True  # Set the running flag
+
+    #         # Create and start monitor process
+    #         self.monitor_thread = multiprocessing.Process(
+    #             target=self._run_monitor_process,
+    #             args=(self.monitor_running, self.monitor_stats)
+    #         )
+    #         self.monitor_thread.daemon = False  # Change to non-daemon process
+    #         self.monitor_thread.start()
+
+    #         # Wait a moment to ensure process starts
+    #         time.sleep(1)
+
+    #         if not self.monitor_thread.is_alive():
+    #             raise Exception("Monitor process failed to start")
+
+    #         print(f"\n✓ Monitoring started in background (PID: {self.monitor_thread.pid})")
+    #         return True
+
+    #     except Exception as e:
+    #         print(f"\nError starting monitor: {e}")
+    #         self.monitor_stats['is_running'] = False
+    #         self.monitor_running.value = False
+    #         return False
+
     def start_detached_monitor(self) -> bool:
-        """Start monitoring in a separate process"""
-        if self.monitor_process and self.monitor_process.is_alive():
+        """Start monitoring in a separate thread"""
+        if self.monitor_thread and self.monitor_thread.is_alive():
             print("\nMonitoring is already running!")
             return False
 
         try:
-            # Create a pipe for communication
-            self.monitor_running.value = True
+            self.monitor_running = True
             self.monitor_stats['start_time'] = datetime.now().isoformat()
-            self.monitor_stats['is_running'] = True  # Set the running flag
+            self.monitor_stats['is_running'] = True
 
-            # Create and start monitor process
-            self.monitor_process = multiprocessing.Process(
-                target=self._run_monitor_process,
-                args=(self.monitor_running, self.monitor_stats)
+            # Create and start monitor thread
+            self.monitor_thread = threading.Thread(
+                target=self._run_monitor_thread,
+                daemon=True
             )
-            self.monitor_process.daemon = False  # Change to non-daemon process
-            self.monitor_process.start()
+            self.monitor_thread.start()
 
-            # Wait a moment to ensure process starts
+            # Wait a moment to ensure thread starts
             time.sleep(1)
 
-            if not self.monitor_process.is_alive():
-                raise Exception("Monitor process failed to start")
+            if not self.monitor_thread.is_alive():
+                raise Exception("Monitor thread failed to start")
 
-            print(f"\n✓ Monitoring started in background (PID: {self.monitor_process.pid})")
+            print(f"\n✓ Monitoring started in background")
             return True
 
         except Exception as e:
             print(f"\nError starting monitor: {e}")
             self.monitor_stats['is_running'] = False
-            self.monitor_running.value = False
+            self.monitor_running = False
             return False
 
     def get_monitor_status(self) -> Dict:
-        """Get status of monitoring process"""
-        if self.monitor_process and self.monitor_process.is_alive():
+        """Get status of monitoring"""
+        if self.monitor_thread and self.monitor_thread.is_alive():
             uptime = 0
             if self.monitor_stats.get('start_time'):
                 start_time = datetime.fromisoformat(self.monitor_stats['start_time'])
@@ -221,7 +337,6 @@ class NetworkController:
 
             return {
                 'running': True,
-                'pid': self.monitor_process.pid,
                 'uptime_seconds': uptime,
                 'total_connections': self.monitor_stats['total_connections'],
                 'blocked_attempts': self.monitor_stats['blocked_attempts'],
@@ -376,6 +491,76 @@ class NetworkController:
                     print(f"    └─ Unique destinations: {len(stats['unique_destinations'])}")
 
         self.internal.active_apps = current_apps
+
+    def get_global_blocks(self) -> List[Dict]:
+        """Get list of active global blocks"""
+        return self.internal.get_global_blocks()
+
+    def block_global(self, target: str) -> bool:
+        """Block target globally for all applications"""
+        try:
+            print(f"NetworkController: Attempting to block {target} globally")  # Debug
+            # Validate target
+            if not self.interceptor._is_ip(target):
+                print(f"NetworkController: Resolving domain {target}...")  # Debug
+                resolved = self.interceptor.resolve_domain(target)
+                if not resolved['ipv4'] and not resolved['ipv6']:
+                    print(f"Error: Could not resolve {target}")
+                    return False
+                print(f"NetworkController: Resolved to: {', '.join(resolved['ipv4'] + resolved['ipv6'])}")  # Debug
+            
+            # Add global blocking rule
+            print("NetworkController: Calling interceptor.add_global_blocking_rule")  # Debug
+            if self.interceptor.add_global_blocking_rule(target):
+                # Force cache update
+                self.internal.last_cache_update = 0
+                print(f"NetworkController: Successfully blocked {target} globally")  # Debug
+                
+                # Also add rule to proxy if running
+                if self.internal.proxy_running:
+                    self.proxy.add_global_blocking_rule(target)
+                
+                # Update statistics
+                self.internal._update_rule_cache()
+                return True
+                
+            print("NetworkController: Failed to add global blocking rule")  # Debug
+            return False
+            
+        except Exception as e:
+            print(f"NetworkController Error: {str(e)}")  # Debug
+            print(f"Error adding global block: {e}")
+            return False
+
+    def unblock_global(self, rule_id: int) -> bool:
+        """Remove global blocking rule"""
+        try:
+            # Get rule details before removing
+            blocks = self.get_global_blocks()
+            rule = next((b for b in blocks if b['id'] == rule_id), None)
+
+            if self.interceptor.remove_global_blocking_rule(rule_id):
+                # Force cache update
+                self.internal.last_cache_update = 0
+                print(f"✓ Removed global blocking rule {rule_id}")
+
+                # Also remove from proxy if running
+                if self.internal.proxy_running and rule:
+                    self.proxy.remove_global_blocking_rule(rule_id)
+
+                # Update statistics
+                self.internal._update_rule_cache()
+                return True
+
+            return False
+
+        except Exception as e:
+            print(f"Error removing global block: {e}")
+            return False
+        
+    def get_global_blocks(self) -> List[Dict]:
+        """Get list of active global blocks"""
+        return self.internal.get_global_blocks()
 
     def monitor_with_control(self):
         """Main monitoring loop with integrated blocking"""

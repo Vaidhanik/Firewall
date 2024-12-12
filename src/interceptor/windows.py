@@ -431,3 +431,184 @@ class WindowsInterceptor(BaseInterceptor):
             }
         except Exception:
             return {'user': None, 'command': None}
+
+    def add_global_blocking_rule(self, target: str) -> bool:
+        """Add global blocking rule"""
+        target_type = 'ip' if self._is_ip(target) else 'domain'
+        resolved_addresses = {'ipv4': [], 'ipv6': []}
+    
+        if target_type == 'domain':
+            self.logger.info(f"Resolving domain {target}...")
+            resolved_addresses = self.resolve_domain(target)
+            if not resolved_addresses['ipv4'] and not resolved_addresses['ipv6']:
+                self.logger.error(f"Could not resolve {target}")
+                return False
+        else:
+            # Single IP address
+            if ':' in target:
+                resolved_addresses['ipv6'] = [target]
+            else:
+                resolved_addresses['ipv4'] = [target]
+    
+        try:
+            # Add to database first
+            all_ips = resolved_addresses['ipv4'] + resolved_addresses['ipv6']
+            rule_id = self.db.add_global_rule(target, target_type, all_ips)
+            if not rule_id:
+                return False
+    
+            # Track successful rules for rollback
+            successful_rules = []
+            failed = False
+    
+            # Add rules for each IP
+            for ip in all_ips:
+                if self._create_global_windows_rule(ip, 'add'):
+                    successful_rules.append(ip)
+                else:
+                    failed = True
+                    break
+    
+            if failed:
+                # Rollback successful rules
+                for ip in successful_rules:
+                    try:
+                        self._create_global_windows_rule(ip, 'remove')
+                    except:
+                        pass
+                # Deactivate the rule in database
+                self.db.deactivate_global_rule(rule_id)
+                return False
+    
+            self.logger.info(f"Successfully added global blocking rules for {target}")
+            return True
+    
+        except Exception as e:
+            self.logger.error(f"Error adding global blocking rule: {e}")
+            return False
+    
+    def remove_global_blocking_rule(self, rule_id: int) -> bool:
+        """Remove global blocking rule"""
+        try:
+            # Get rule details
+            rule = self.db.get_global_rule(rule_id)
+            if not rule:
+                return False
+    
+            target, target_type, resolved_ips = rule[1:]
+    
+            success = True
+            # Remove firewall rules
+            if resolved_ips:
+                for ip in resolved_ips.split(','):
+                    if not self._create_global_windows_rule(ip.strip(), 'remove'):
+                        success = False
+    
+            # Also try target if it's an IP
+            if target_type == 'ip':
+                if not self._create_global_windows_rule(target, 'remove'):
+                    success = False
+    
+            # Deactivate in database if any rules were removed
+            if success:
+                self.db.deactivate_global_rule(rule_id)
+                self.logger.info(f"Successfully removed global blocking rule for {target}")
+    
+            return success
+    
+        except Exception as e:
+            self.logger.error(f"Error removing global blocking rule: {e}")
+            return False
+    
+    def _create_global_windows_rule(self, target_ip: str, action: str = 'add') -> bool:
+        """Create Windows Firewall global blocking rules"""
+        try:
+            rule_base_name = f"GLOBAL_BLOCK_{target_ip}"
+    
+            if action == 'add':
+                # First remove any existing rules with this name
+                cleanup_cmd = [
+                    'powershell', '-Command',
+                    f'Remove-NetFirewallRule -Name "{rule_base_name}_*" -ErrorAction SilentlyContinue'
+                ]
+                subprocess.run(cleanup_cmd, capture_output=True, text=True)
+    
+                # Create rules for both TCP and UDP
+                for protocol in ['TCP', 'UDP']:
+                    rule_name = f"{rule_base_name}_{protocol}"
+    
+                    # Create PowerShell command
+                    ps_cmd = [
+                        'powershell', '-Command',
+                        'New-NetFirewallRule',
+                        f'-DisplayName "{rule_name}"',
+                        f'-Name "{rule_name}"',
+                        '-Direction Outbound',
+                        '-Action Block',
+                        '-Enabled True',
+                        f'-Protocol {protocol}',
+                        f'-RemoteAddress {target_ip}',
+                        '-Profile Private,Public,Domain'
+                    ]
+    
+                    try:
+                        process = subprocess.run(
+                            ps_cmd,
+                            capture_output=True,
+                            text=True,
+                            creationflags=subprocess.CREATE_NO_WINDOW
+                        )
+    
+                        if process.returncode != 0:
+                            # Try netsh as backup
+                            netsh_cmd = [
+                                'netsh', 'advfirewall', 'firewall', 'add', 'rule',
+                                f'name="{rule_name}"',
+                                'dir=out',
+                                'action=block',
+                                'enable=yes',
+                                f'protocol={protocol}',
+                                f'remoteip={target_ip}',
+                                'profile=private,public,domain'
+                            ]
+    
+                            process = subprocess.run(
+                                netsh_cmd,
+                                capture_output=True,
+                                text=True,
+                                creationflags=subprocess.CREATE_NO_WINDOW
+                            )
+    
+                            if process.returncode != 0:
+                                return False
+    
+                        self.logger.info(f"Added global {protocol} block for {target_ip}")
+    
+                    except Exception as e:
+                        self.logger.error(f"Error creating rule: {e}")
+                        return False
+    
+                return True
+    
+            else:  # Remove rules
+                # Try PowerShell removal
+                ps_cmd = [
+                    'powershell', '-Command',
+                    f'Remove-NetFirewallRule -Name "{rule_base_name}_*" -ErrorAction SilentlyContinue'
+                ]
+                subprocess.run(ps_cmd, capture_output=True, text=True)
+    
+                # Also try netsh removal as backup
+                for protocol in ['TCP', 'UDP']:
+                    rule_name = f"{rule_base_name}_{protocol}"
+                    cmd = [
+                        'netsh', 'advfirewall', 'firewall', 'delete', 'rule',
+                        f'name="{rule_name}"'
+                    ]
+                    subprocess.run(cmd, capture_output=True, text=True)
+    
+                return True
+    
+        except Exception as e:
+            self.logger.error(f"Error managing Windows Firewall rules: {e}")
+            return False

@@ -84,6 +84,18 @@ class NetworkInterceptor():
         """Check if string is IP address"""
         return self.interceptor._is_ip(addr)
 
+    def add_global_blocking_rule(self, target: str) -> bool:
+        """Add global blocking rule"""
+        return self.interceptor.add_global_blocking_rule(target)
+
+    def remove_global_blocking_rule(self, rule_id: int) -> bool:
+        """Remove global blocking rule"""
+        return self.interceptor.remove_global_blocking_rule(rule_id)
+
+    def get_global_blocks(self) -> List[Dict]:
+        """Get list of active global blocking rules"""
+        return self.db.get_active_global_rules()
+
     def check_connection_allowed(self, conn_data: Dict) -> Tuple[bool, Dict]:
         """
         Check if connection should be allowed based on network patterns

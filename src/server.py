@@ -586,6 +586,103 @@ def get_network_data():
             'error': 'Internal server error',
             'details': str(e)
         }), 500
+
+@app.route('/global/block', methods=['POST'])
+def block_global():
+    """Block target globally across all applications"""
+    try:
+        data = request.get_json()
+        if not data or not data.get('target'):
+            return jsonify({
+                'success': False,
+                'error': 'Target is required'
+            }), 400
+            
+        target = data['target']
+        logger.info(f"NetworkController: Attempting to block {target} globally")
+            
+        # First resolve the domain
+        resolved_ips = controller.interceptor.resolve_domain(target)
+        logger.info(f"NetworkController: Resolved to: {', '.join(resolved_ips['ipv4'] + resolved_ips['ipv6'])}")
+        
+        logger.info("NetworkController: Calling interceptor.add_global_blocking_rule")
+        success = controller.block_global(target)
+        
+        if not success:
+            return jsonify({
+                'success': False,
+                'error': f"Failed to block {target} globally",
+                'target': target
+            }), 400
+
+        return jsonify({
+            'success': True,
+            'message': f"Successfully blocked {target} globally",
+            'target': target
+        })
+        
+    except Exception as e:
+        logger.error(f"Error: {str(e)}\n{traceback.format_exc()}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/global/rules', methods=['GET'])
+def get_global_rules():
+    """Get all active global rules"""
+    try:
+        rules = controller.get_global_blocks()
+        
+        if not rules:
+            return jsonify({
+                'success': False,
+                'message': 'No active global rules found'
+            }), 404
+
+        return jsonify({
+            'success': True,
+            'rules': rules
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/global/unblock', methods=['POST'])
+def unblock_global():
+    """Remove global blocking rule"""
+    try:
+        data = request.get_json()
+        if not data or not data.get('rule_id'):
+            return jsonify({
+                'success': False,
+                'error': 'rule_id is required'
+            }), 400
+            
+        rule_id = data['rule_id']
+        success = controller.unblock_global(rule_id)
+        
+        if not success:
+            return jsonify({
+                'success': False,
+                'error': f"Failed to remove global block {rule_id}",
+                'rule_id': rule_id
+            }), 400
+
+        return jsonify({
+            'success': True,
+            'message': f"Successfully removed global block {rule_id}",
+            'rule_id': rule_id
+        })
+        
+    except Exception as e:
+        logger.error(f"Error: {str(e)}\n{traceback.format_exc()}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
       
 @app.route('/cleanup', methods=['POST'])
 def cleanup():

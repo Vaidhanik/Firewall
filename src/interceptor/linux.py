@@ -501,3 +501,161 @@ class LinuxInterceptor(BaseInterceptor):
             return self._create_linux_rules(app_path, target_ip, 'ipv6', action)
         else:  # IPv4
             return self._create_linux_rules(app_path, target_ip, 'ipv4', action)
+
+    def add_global_blocking_rule(self, target: str) -> bool:
+        """Add global blocking rule"""
+        target_type = 'ip' if self._is_ip(target) else 'domain'
+        resolved_addresses = {'ipv4': [], 'ipv6': []}
+
+        if target_type == 'domain':
+            self.logger.info(f"Resolving domain {target}...")
+            resolved_addresses = self.resolve_domain(target)
+            if not resolved_addresses['ipv4'] and not resolved_addresses['ipv6']:
+                self.logger.error(f"Could not resolve {target}")
+                return False
+        else:
+            # Single IP address
+            if ':' in target:
+                resolved_addresses['ipv6'] = [target]
+            else:
+                resolved_addresses['ipv4'] = [target]
+
+        try:
+            # Add to database first
+            all_ips = resolved_addresses['ipv4'] + resolved_addresses['ipv6']
+            rule_id = self.db.add_global_rule(target, target_type, all_ips)
+            if not rule_id:
+                return False
+
+            # Track successful rules for rollback
+            successful_rules = []
+            failed = False
+
+            # Add IPv4 rules
+            for ip in resolved_addresses['ipv4']:
+                if self._create_global_iptables_rule(ip, 'ipv4', 'add'):
+                    successful_rules.append(('ipv4', ip))
+                else:
+                    failed = True
+                    break
+
+            # Add IPv6 rules if IPv4 was successful
+            if not failed:
+                for ip in resolved_addresses['ipv6']:
+                    if self._create_global_iptables_rule(ip, 'ipv6', 'add'):
+                        successful_rules.append(('ipv6', ip))
+                    else:
+                        failed = True
+                        break
+
+            if failed:
+                # Rollback successful rules
+                for ip_version, ip in successful_rules:
+                    try:
+                        self._create_global_iptables_rule(ip, ip_version, 'remove')
+                    except:
+                        pass
+                # Deactivate the rule in database
+                self.db.deactivate_global_rule(rule_id)
+                return False
+
+            self.logger.info(f"Successfully added global blocking rules for {target}")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Error adding global blocking rule: {e}")
+            return False
+
+    def remove_global_blocking_rule(self, rule_id: int) -> bool:
+        """Remove global blocking rule"""
+        try:
+            # Get rule details
+            rule = self.db.get_global_rule(rule_id)
+            if not rule:
+                return False
+
+            target, target_type, resolved_ips = rule[1:]
+
+            success = True
+            # Remove firewall rules
+            if resolved_ips:
+                for ip in resolved_ips.split(','):
+                    ip_version = 'ipv6' if ':' in ip else 'ipv4'
+                    if not self._create_global_iptables_rule(ip.strip(), ip_version, 'remove'):
+                        success = False
+
+            # Also try target if it's an IP
+            if target_type == 'ip':
+                ip_version = 'ipv6' if ':' in target else 'ipv4'
+                if not self._create_global_iptables_rule(target, ip_version, 'remove'):
+                    success = False
+
+            # Deactivate in database
+            if success:
+                self.db.deactivate_global_rule(rule_id)
+                self.logger.info(f"Successfully removed global blocking rule for {target}")
+
+            return success
+
+        except Exception as e:
+            self.logger.error(f"Error removing global blocking rule: {e}")
+            return False
+
+    def _create_global_iptables_rule(self, target_ip: str, ip_version: str, action: str = 'add') -> bool:
+        """Create simple global iptables/ip6tables blocking rule"""
+        try:
+            cmd = 'ip6tables' if ip_version == 'ipv6' else 'iptables'
+            
+            if action == 'add':
+                # Block incoming and outgoing traffic
+                basic_rules = [
+                    # Block incoming
+                    ['sudo', cmd, '-I', 'INPUT', '-s', target_ip, '-j', 'DROP'],
+                    ['sudo', cmd, '-I', 'INPUT', '-d', target_ip, '-j', 'DROP'],
+                    # Block outgoing
+                    ['sudo', cmd, '-I', 'OUTPUT', '-s', target_ip, '-j', 'DROP'],
+                    ['sudo', cmd, '-I', 'OUTPUT', '-d', target_ip, '-j', 'DROP'],
+                    # Block forwarding
+                    ['sudo', cmd, '-I', 'FORWARD', '-s', target_ip, '-j', 'DROP'],
+                    ['sudo', cmd, '-I', 'FORWARD', '-d', target_ip, '-j', 'DROP']
+                ]
+                
+                for rule in basic_rules:
+                    subprocess.run(rule, check=True)
+                return True
+                
+            else:  # Remove rules
+                try:
+                    subprocess.run(
+                        ['sudo', cmd, '-D', 'INPUT', '-s', target_ip, '-j', 'DROP'], 
+                        check=False
+                    )
+                    subprocess.run(
+                        ['sudo', cmd, '-D', 'INPUT', '-d', target_ip, '-j', 'DROP'],
+                        check=False
+                    )
+                    subprocess.run(
+                        ['sudo', cmd, '-D', 'OUTPUT', '-s', target_ip, '-j', 'DROP'],
+                        check=False
+                    )
+                    subprocess.run(
+                        ['sudo', cmd, '-D', 'OUTPUT', '-d', target_ip, '-j', 'DROP'],
+                        check=False
+                    )
+                    subprocess.run(
+                        ['sudo', cmd, '-D', 'FORWARD', '-s', target_ip, '-j', 'DROP'],
+                        check=False
+                    )
+                    subprocess.run(
+                        ['sudo', cmd, '-D', 'FORWARD', '-d', target_ip, '-j', 'DROP'],
+                        check=False
+                    )
+                    return True
+                    
+                except subprocess.CalledProcessError as e:
+                    self.logger.error(f"Error removing rules: {e}")
+                    return False
+                    
+        except Exception as e:
+            self.logger.error(f"Error managing {cmd} rules: {e}")
+            return False
