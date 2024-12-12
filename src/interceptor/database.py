@@ -70,6 +70,7 @@ class DatabaseHandler:
 
         # AI DB
         self.ai_decisions_collection = self.rules_db.ai_decisions
+        self.global_rules_collection = self.rules_db.global_rules
         self._setup_ai_indexes()
 
     def _setup_ai_indexes(self):
@@ -324,6 +325,117 @@ class DatabaseHandler:
            self.logger.error(f"Database error updating IPs: {e}")
            return False
 
+    # def add_global_rule(self, target: str, target_type: str, resolved_ips: List[str]) -> Optional[int]:
+    #     """Add new global blocking rule to database"""
+    #     try:
+    #         rule = {
+    #             "target": target,
+    #             "target_type": target_type,
+    #             "resolved_ips": resolved_ips,
+    #             "created_at": datetime.now().isoformat(),
+    #             "active": True
+    #         }
+    #         rule["id"] = self._get_unique_id(rule, self.global_rules_collection)
+    #         result = self.global_rules_collection.insert_one(rule)
+
+    #         if result.inserted_id:
+    #             return rule["id"]
+    #         return None
+    #     except Exception as e:
+    #         self.logger.error(f"Database error adding global rule: {e}")
+    #         return None
+    def add_global_rule(self, target: str, target_type: str, resolved_ips: List[str]) -> Optional[int]:
+        """Add global rule to database"""
+        try:
+            rule = {
+                "target": target,
+                "target_type": target_type,
+                "resolved_ips": resolved_ips,
+                "created_at": datetime.now().isoformat(),
+                "active": True
+            }
+            rule["id"] = self._get_unique_id(rule, self.global_rules_collection)
+            self.global_rules_collection.insert_one(rule)
+            return rule["id"]
+        except Exception as e:
+            self.logger.error(f"Database error adding global rule: {e}")
+            return None
+        
+    def get_active_global_rules(self) -> List[Dict]:
+        """Get all active global blocking rules"""
+        try:
+            rules = self.global_rules_collection.find({"active": True})
+            return [{
+                "id": rule["id"],
+                "target": rule["target"],
+                "type": rule["target_type"],
+                "ips": rule.get("resolved_ips", []),
+                "created_at": rule.get("created_at")
+            } for rule in rules]
+        except Exception as e:
+            self.logger.error(f"Database error getting global rules: {e}")
+            return []
+
+    def get_global_rule(self, rule_id: int) -> Optional[Tuple]:
+        """Get details of a specific global rule"""
+        try:
+            rule = self.global_rules_collection.find_one({"id": rule_id, "active": True})
+            if rule:
+                return (
+                    rule["id"],
+                    rule["target"],
+                    rule["target_type"],
+                    ','.join(rule.get("resolved_ips", []))
+                )
+            return None
+        except Exception as e:
+            self.logger.error(f"Database error getting global rule: {e}")
+            return None
+
+    def deactivate_global_rule(self, rule_id: int) -> bool:
+        """Deactivate a global blocking rule"""
+        try:
+            result = self.global_rules_collection.update_one(
+                {"id": rule_id},
+                {
+                    "$set": {
+                        "active": False,
+                        "deactivated_at": datetime.now().isoformat()
+                    }
+                }
+            )
+            return result.modified_count > 0
+        except Exception as e:
+            self.logger.error(f"Database error deactivating global rule: {e}")
+            return False
+
+    def update_global_rule_ips(self, rule_id: int, ips: List[str]) -> bool:
+        """Update resolved IPs for a global rule"""
+        try:
+            result = self.global_rules_collection.update_one(
+                {"id": rule_id},
+                {"$set": {"resolved_ips": ips}}
+            )
+            return result.modified_count > 0
+        except Exception as e:
+            self.logger.error(f"Database error updating global rule IPs: {e}")
+            return False
+
+    def log_global_block_attempt(self, rule_id: int, source_ip: str, target: str, details: str):
+        """Log blocked connection attempt for global rules"""
+        try:
+            attempt = {
+                "rule_id": rule_id,
+                "source_ip": source_ip,
+                "target": target,
+                "details": details,
+                "rule_type": "global",
+                "timestamp": datetime.now().isoformat()
+            }
+            self.blocked_attempts_collection.insert_one(attempt)
+        except Exception as e:
+            self.logger.error(f"Database error logging global block attempt: {e}")
+            
     ##############
     ## AI STUFF ##
     ##############
