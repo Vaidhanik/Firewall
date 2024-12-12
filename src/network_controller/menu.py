@@ -14,7 +14,50 @@ def display_menu():
     print("11. View Connection Patterns")
     print("12. Debug: Check Monitor Data")
     print("13. Implement AI Recommendation")
-    return input("\nSelect an option (1-13): ").strip()
+    print("14. Add Global Block")  # New option
+    print("15. View/Remove Global Blocks")  # New option
+    return input("\nSelect an option (1-15): ").strip()
+
+def handle_global_block(controller):
+    """Handle adding global blocking rule"""
+    print("\nEnter target to block globally (IP or domain):")
+    target = input("> ").strip()
+    
+    if controller.block_global(target):
+        print(f"\nSuccessfully blocked {target} globally")
+    else:
+        print("\nFailed to create global blocking rule")
+
+def handle_view_global_blocks(controller):
+    """Handle viewing and removing global blocking rules"""
+    blocks = controller.get_global_blocks()
+    
+    if not blocks:
+        print("\nNo active global blocking rules")
+        return
+    
+    print("\nCurrent global blocking rules:")
+    for i, block in enumerate(blocks, 1):
+        print(f"{i}. Target: {block['target']}")
+        print(f"   └─ Type: {block['type']}")
+        print(f"   └─ IPs: {', '.join(block['ips'])}")
+    
+    try:
+        action = input("\nEnter rule number to remove (0 to cancel): ").strip()
+        if action == '0':
+            return
+            
+        rule_idx = int(action) - 1
+        if 0 <= rule_idx < len(blocks):
+            block = blocks[rule_idx]
+            if controller.unblock_global(block['id']):
+                print(f"\nSuccessfully removed global blocking rule")
+            else:
+                print("\nFailed to remove global blocking rule")
+        else:
+            print("\nInvalid rule number")
+    except ValueError:
+        print("\nInvalid input")
 
 def handle_implement_recommendation(controller):
     """Handle implementing AI recommendation"""
