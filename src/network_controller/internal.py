@@ -226,3 +226,27 @@ class InternalController:
         except Exception as e:
             print(f"\nError stopping proxy: {e}")
             return False
+        
+    def get_global_blocks(self) -> List[Dict]:
+        """Get list of active global blocks"""
+        try:
+            blocks = self.interceptor.get_global_blocks()
+            
+            # Also update our internal cache
+            self._update_rule_cache()
+            
+            # Add any additional stats if needed
+            for block in blocks:
+                if 'active_since' not in block:
+                    block['active_since'] = block.get('created_at', 'unknown')
+                
+                # Get stats for this block if available
+                stats = self.stats.get(f"global_block_{block['id']}", {})
+                if stats:
+                    block.update(stats)
+            
+            return blocks
+            
+        except Exception as e:
+            self.logger.error(f"Error getting global blocks: {e}")
+            return []
