@@ -47,6 +47,57 @@ stop:
 	@sudo pkill -f "python3 ./src/server.py" || true
 	@echo "$(GREEN)Server stopped$(NC)"
 
+global-block:
+	$(call check_vars,$(TARGET),TARGET,global-block)
+	@echo "$(YELLOW)Adding global block for $(TARGET)...$(NC)"
+	@curl -s -X POST $(API_URL)/global/block \
+		-H "Content-Type: application/json" \
+		-d '{"target":"$(TARGET)"}' | jq '.'
+
+list-global-rules:
+	@echo "$(YELLOW)Getting current global blocking rules...$(NC)"
+	@curl -s $(API_URL)/global/rules | jq '.'
+
+unblock-global:
+	$(call check_vars,$(RULE_ID),RULE_ID,unblock-global)
+	@echo "$(YELLOW)Removing global block $(RULE_ID)...$(NC)"
+	@curl -s -X POST $(API_URL)/global/unblock \
+		-H "Content-Type: application/json" \
+		-d '{"rule_id":$(RULE_ID)}' | jq '.'
+
+test-global-all: 
+	@echo "$(YELLOW)Testing global blocking functionality...$(NC)"
+	@make global-block TARGET=1.1.1.1
+	@sleep 2
+	@echo "\n$(YELLOW)Checking rules...$(NC)"
+	@make list-global-rules
+	@sleep 2
+	@RULE_ID=$$(curl -s $(API_URL)/global/rules | jq -r '.rules[0].id'); \
+	if [ "$$RULE_ID" != "null" ]; then \
+		make unblock-global RULE_ID=$$RULE_ID; \
+	fi
+
+# Test with a specific IP
+test-global-ip:
+	@if [ -z "$(IP)" ]; then \
+		echo "Please provide IP address using IP=x.x.x.x"; \
+		exit 1; \
+	fi
+	@echo "Testing global block for IP: $(IP)"
+	@python3 -c "from network_controller import NetworkController; \
+		controller = NetworkController(); \
+		controller.block_global('$(IP)')"
+	@echo "\nVerifying rules..."
+	@sudo iptables -L INPUT -n | grep "$(IP)" || echo "No IPv4 rules found"
+	@sudo iptables -L OUTPUT -n | grep "$(IP)" || echo "No IPv4 rules found"
+
+check-iptables:
+	@echo "$(YELLOW)Checking iptables rules...$(NC)"
+	@echo "\n$(GREEN)IPv4 Rules:$(NC)"
+	@sudo iptables -L GLOBAL_BLOCKS -n -v --line-numbers 2>/dev/null || echo "No GLOBAL_BLOCKS chain found"
+	@echo "\n$(GREEN)IPv6 Rules:$(NC)"
+	@sudo ip6tables -L GLOBAL_BLOCKS -n -v --line-numbers 2>/dev/null || echo "No GLOBAL_BLOCKS chain found"
+
 cleanup-rules:
 	@echo "$(YELLOW)Cleaning up firewall rules and saving state...$(NC)"
 	@curl -s -X POST $(API_URL)/cleanup | jq '.'
