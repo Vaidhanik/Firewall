@@ -2,12 +2,12 @@ import os
 import sys
 import ctypes
 import subprocess
+from typing import List
 if sys.platform == 'win32':
     import win32api
     import win32con
     import win32security
     import win32com.client
-from typing import List
 from .base import BaseInterceptor
 
 class WindowsInterceptor(BaseInterceptor):
