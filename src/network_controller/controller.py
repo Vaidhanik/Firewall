@@ -377,6 +377,108 @@ class NetworkController:
 
         self.internal.active_apps = current_apps
 
+    def get_global_blocks(self) -> List[Dict]:
+        """Get list of active global blocks"""
+        return self.internal.get_global_blocks()
+
+    # def block_global(self, target: str) -> bool:
+    #     """Block target globally for all applications"""
+    #     try:
+    #         # Validate target
+    #         if not self.interceptor._is_ip(target):
+    #             print(f"Resolving domain {target}...")
+    #             resolved = self.interceptor.resolve_domain(target)
+    #             if not resolved['ipv4'] and not resolved['ipv6']:
+    #                 print(f"Error: Could not resolve {target}")
+    #                 return False
+    #             print(f"Resolved to: {', '.join(resolved['ipv4'] + resolved['ipv6'])}")
+
+    #         # Add global blocking rule
+    #         if self.interceptor.add_global_blocking_rule(target):
+    #             # Force cache update
+    #             self.internal.last_cache_update = 0
+    #             print(f"✓ Globally blocked access to {target}")
+
+    #             # Also add rule to proxy if running
+    #             if self.internal.proxy_running:
+    #                 self.proxy.add_global_blocking_rule(target)
+
+    #             # Update statistics
+    #             self.internal._update_rule_cache()
+    #             return True
+
+    #         return False
+
+    #     except Exception as e:
+    #         print(f"Error adding global block: {e}")
+    #         return False
+
+    def block_global(self, target: str) -> bool:
+        """Block target globally for all applications"""
+        try:
+            print(f"NetworkController: Attempting to block {target} globally")  # Debug
+            # Validate target
+            if not self.interceptor._is_ip(target):
+                print(f"NetworkController: Resolving domain {target}...")  # Debug
+                resolved = self.interceptor.resolve_domain(target)
+                if not resolved['ipv4'] and not resolved['ipv6']:
+                    print(f"Error: Could not resolve {target}")
+                    return False
+                print(f"NetworkController: Resolved to: {', '.join(resolved['ipv4'] + resolved['ipv6'])}")  # Debug
+            
+            # Add global blocking rule
+            print("NetworkController: Calling interceptor.add_global_blocking_rule")  # Debug
+            if self.interceptor.add_global_blocking_rule(target):
+                # Force cache update
+                self.internal.last_cache_update = 0
+                print(f"NetworkController: Successfully blocked {target} globally")  # Debug
+                
+                # Also add rule to proxy if running
+                if self.internal.proxy_running:
+                    self.proxy.add_global_blocking_rule(target)
+                
+                # Update statistics
+                self.internal._update_rule_cache()
+                return True
+                
+            print("NetworkController: Failed to add global blocking rule")  # Debug
+            return False
+            
+        except Exception as e:
+            print(f"NetworkController Error: {str(e)}")  # Debug
+            print(f"Error adding global block: {e}")
+            return False
+
+    def unblock_global(self, rule_id: int) -> bool:
+        """Remove global blocking rule"""
+        try:
+            # Get rule details before removing
+            blocks = self.get_global_blocks()
+            rule = next((b for b in blocks if b['id'] == rule_id), None)
+
+            if self.interceptor.remove_global_blocking_rule(rule_id):
+                # Force cache update
+                self.internal.last_cache_update = 0
+                print(f"✓ Removed global blocking rule {rule_id}")
+
+                # Also remove from proxy if running
+                if self.internal.proxy_running and rule:
+                    self.proxy.remove_global_blocking_rule(rule_id)
+
+                # Update statistics
+                self.internal._update_rule_cache()
+                return True
+
+            return False
+
+        except Exception as e:
+            print(f"Error removing global block: {e}")
+            return False
+        
+    def get_global_blocks(self) -> List[Dict]:
+        """Get list of active global blocks"""
+        return self.internal.get_global_blocks()
+    
     def monitor_with_control(self):
         """Main monitoring loop with integrated blocking"""
         print("\nStarting Network Control System...")
