@@ -6,3 +6,6 @@ pymongo==4.10.1
 mitmproxy==9.0.1
 netifaces==0.11.0
 python-dotenv==1.0.1
+# pip install netifaces python-nmap scapy psutil
+
+# pydivert
