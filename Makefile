@@ -209,6 +209,9 @@ clean:
 #=======================NETWORK_CONTROLLER=======================#
 #================================================================#
 
+run-manager:
+	sudo $(FIREWALL_DIR)/test/.firewall/bin/python3 ./src/MANAGER/manager.py
+
 run-tracer:
 # sudo rm -rf src/network_controller/logs
 	sudo rm -rf src/monitor/logs
